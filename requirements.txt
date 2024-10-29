@@ -8,6 +8,6 @@ oauth2client
 httplib2
 urllib3
 google-analytics-admin
+google-analytics-data
 
 protobuf
-win_unicode_console
