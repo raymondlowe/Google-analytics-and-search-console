@@ -3,7 +3,12 @@
 import argparse
 import datetime
 import time
-import win_unicode_console
+import platform  # For OS detection
+import webbrowser  # For opening URLs
+import re  # For parsing error messages
+import os
+import pickle
+
 from google.analytics.admin import AnalyticsAdminServiceClient
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import (
@@ -12,14 +17,18 @@ from google.analytics.data_v1beta.types import (
     Metric,
     RunReportRequest,
 )
-from googleAPIget_service import get_service  # Assuming this is adapted for GA4
+from google_auth_oauthlib.flow import InstalledAppFlow
+from googleapiclient.errors import HttpError
+from google.api_core.exceptions import PermissionDenied
 import pandas as pd
 from pandas import ExcelWriter
 from progress.bar import IncrementalBar
-from googleapiclient.errors import HttpError
-from urllib.parse import urlparse
 
-win_unicode_console.enable()
+
+# OS-specific console setup
+if platform.system() == "Windows":
+    import win_unicode_console  # Import only if on Windows
+    win_unicode_console.enable()
 
 parser = argparse.ArgumentParser()
 
@@ -34,6 +43,7 @@ parser.add_argument("-t", "--test", nargs='?', const=3, type=int, help="Test mod
 parser.add_argument("-w", "--wait", type=int, default=0, help="Wait time in seconds between API calls")
 parser.add_argument("-g", "--googleaccount", type=str, required=True,
                     help="Google account token or file with account tokens, one per line")
+parser.add_argument("-s", "--secrets", type=str, required=True, help="Path to client_secrets.json")
 
 args = parser.parse_args()
 
@@ -46,7 +56,8 @@ name = args.name
 test = args.test
 googleaccountstring = args.googleaccount
 wait_seconds = args.wait
-
+CLIENT_SECRETS_FILE = args.secrets  # Now gets path from command line
+SCOPES = ["https://www.googleapis.com/auth/analytics.readonly"]
 
 options = [[start_date, end_date, filters, dimensions, metrics, name, googleaccountstring]]
 optionsdf = pd.DataFrame(options,
@@ -55,20 +66,79 @@ optionsdf = pd.DataFrame(options,
 splitMetrics = metrics.split(',')
 
 
+
+def authenticate_and_get_clients(google_account, client_secrets_file): # Added client secret as parameter
+    """Authenticates the user and returns GA4 clients."""
+
+    creds = None
+
+    token_pickle_file = f"token_{google_account.replace(':', '_')}.pickle" #safe filename
+
+    if os.path.exists(token_pickle_file):
+        with open(token_pickle_file, 'rb') as token:
+            creds = pickle.load(token)
+
+    if not creds :
+
+        flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
+        creds = flow.run_local_server(port=0)
+
+        store_credentials = input(f"Do you want to store credentials for {google_account} for future use? (yes/no): ")
+        if store_credentials.lower() == "yes":
+           with open(token_pickle_file, 'wb') as token:
+               pickle.dump(creds, token)
+
+
+
+    try:
+        data_client = BetaAnalyticsDataClient(credentials=creds)
+        admin_client = AnalyticsAdminServiceClient(credentials=creds)
+
+
+        account_id = google_account.split("-")[0]
+        admin_client.list_properties(filter_=f"parent:accounts/{account_id}", page_size=1)
+        return admin_client, data_client
+
+    except PermissionDenied as e:
+
+        match = re.search(r"project (\d+).*https://console\.developers\.google\.com/apis/api/[^/]+/overview\?project=(\d+)", e.message, re.DOTALL)
+
+        if match:
+            project_id = match.group(1)
+            url = f"https://console.developers.google.com/apis/api/analyticsdata.googleapis.com/overview?project={project_id}"
+            print(f"Google Analytics Data API not enabled for project {project_id}.")
+            print(f"Opening URL to enable the API: {url}")
+            webbrowser.open(url)
+            input("Press Enter to continue after enabling the API in your browser...")
+
+
+        else:
+            print(f"An unexpected PermissionDenied error occurred:\n{e.message}")
+        exit(1)
+
+    except HttpError as err:
+        print(f"An HTTP error occurred: {err.resp.status} {err._get_reason()}")
+        exit(1)
+
+    except Exception as e:
+        print("An unexpected error occurred:", e)
+        exit(1)
+
+
+
 combined_df = pd.DataFrame()
 google_accounts_list = [args.googleaccount]  # Initialize for single account case
 
 try:  # Handling multiple accounts
     google_accounts_list = open(args.googleaccount).read().splitlines()
     google_accounts_list = [x.strip() for x in google_accounts_list if x.strip()]
+
 except FileNotFoundError:
     pass  # Proceed with single account
 
 for google_account in google_accounts_list:
     print(f"Processing account: {google_account}")
-    admin_client = AnalyticsAdminServiceClient()  # No credentials needed here, uses GOOGLE_APPLICATION_CREDENTIALS
-    data_client = BetaAnalyticsDataClient()  # No credentials needed here, uses GOOGLE_APPLICATION_CREDENTIALS
-
+    admin_client, data_client = authenticate_and_get_clients(google_account, CLIENT_SECRETS_FILE) # Pass client secrets file
 
     properties = admin_client.list_properties(filter_=f"parent:accounts/{google_account.split('-')[0]}")
     property_count = len(list(properties))
