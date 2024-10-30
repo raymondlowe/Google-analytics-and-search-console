@@ -34,7 +34,7 @@ parser = argparse.ArgumentParser()
 
 parser.add_argument("start_date", help="Start date in format yyyy-mm-dd or 'yesterday', '7DaysAgo'")
 parser.add_argument("end_date", help="End date in format yyyy-mm-dd or 'today'")
-parser.add_argument("-f", "--filters", default='', help="Filter string for GA4 API")  # Adapted for GA4
+parser.add_argument("-f", "--filters", default='', help="Filter string for GA4 API")
 parser.add_argument("-d", "--dimensions", default="pagePath", help="Comma-separated dimensions for GA4 API")
 parser.add_argument("-m", "--metrics", default="activeUsers", help="Comma-separated metrics for GA4 API")
 parser.add_argument("-n", "--name", default='analytics-' + datetime.datetime.now().strftime("%Y-%m-%d-%H-%M-%S"), type=str,
@@ -42,7 +42,7 @@ parser.add_argument("-n", "--name", default='analytics-' + datetime.datetime.now
 parser.add_argument("-t", "--test", nargs='?', const=3, type=int, help="Test mode: limit to n properties")
 parser.add_argument("-w", "--wait", type=int, default=0, help="Wait time in seconds between API calls")
 parser.add_argument("-g", "--googleaccount", type=str, required=True,
-                    help="Google account token or file with account tokens, one per line")
+                    help="Google account email or file with account emails, one per line")
 parser.add_argument("-s", "--secrets", type=str, required=True, help="Path to client_secrets.json")
 
 args = parser.parse_args()
@@ -56,7 +56,7 @@ name = args.name
 test = args.test
 googleaccountstring = args.googleaccount
 wait_seconds = args.wait
-CLIENT_SECRETS_FILE = args.secrets  # Now gets path from command line
+CLIENT_SECRETS_FILE = args.secrets
 SCOPES = ["https://www.googleapis.com/auth/analytics.readonly"]
 
 options = [[start_date, end_date, filters, dimensions, metrics, name, googleaccountstring]]
@@ -67,42 +67,36 @@ splitMetrics = metrics.split(',')
 
 
 
-def authenticate_and_get_clients(google_account, client_secrets_file): # Added client secret as parameter
+def authenticate_and_get_clients(google_account_email, client_secrets_file):
     """Authenticates the user and returns GA4 clients."""
 
     creds = None
 
-    token_pickle_file = f"token_{google_account.replace(':', '_')}.pickle" #safe filename
+    token_pickle_file = f"token_{google_account_email.replace(':', '_')}.pickle"
 
     if os.path.exists(token_pickle_file):
         with open(token_pickle_file, 'rb') as token:
             creds = pickle.load(token)
 
-    if not creds :
-
+    if not creds:
         flow = InstalledAppFlow.from_client_secrets_file(client_secrets_file, SCOPES)
         creds = flow.run_local_server(port=0)
 
-        store_credentials = input(f"Do you want to store credentials for {google_account} for future use? (yes/no): ")
+        store_credentials = input(f"Do you want to store credentials for {google_account_email} for future use? (yes/no): ")
         if store_credentials.lower() == "yes":
            with open(token_pickle_file, 'wb') as token:
                pickle.dump(creds, token)
-
-
 
     try:
         data_client = BetaAnalyticsDataClient(credentials=creds)
         admin_client = AnalyticsAdminServiceClient(credentials=creds)
 
-
-        account_id = google_account.split("-")[0]
-        admin_client.list_properties(filter_=f"parent:accounts/{account_id}", page_size=1)
+        account_id = google_account_email.split('@')[0] # Fix: split at "@"
+        admin_client.list_properties(filter_=f"parent:accounts/{account_id}", page_size=1) # Test API call
         return admin_client, data_client
 
     except PermissionDenied as e:
-
         match = re.search(r"project (\d+).*https://console\.developers\.google\.com/apis/api/[^/]+/overview\?project=(\d+)", e.message, re.DOTALL)
-
         if match:
             project_id = match.group(1)
             url = f"https://console.developers.google.com/apis/api/analyticsdata.googleapis.com/overview?project={project_id}"
@@ -110,8 +104,6 @@ def authenticate_and_get_clients(google_account, client_secrets_file): # Added c
             print(f"Opening URL to enable the API: {url}")
             webbrowser.open(url)
             input("Press Enter to continue after enabling the API in your browser...")
-
-
         else:
             print(f"An unexpected PermissionDenied error occurred:\n{e.message}")
         exit(1)
@@ -127,27 +119,39 @@ def authenticate_and_get_clients(google_account, client_secrets_file): # Added c
 
 
 combined_df = pd.DataFrame()
-google_accounts_list = [args.googleaccount]  # Initialize for single account case
+google_accounts_list = []
 
-try:  # Handling multiple accounts
-    google_accounts_list = open(args.googleaccount).read().splitlines()
-    google_accounts_list = [x.strip() for x in google_accounts_list if x.strip()]
-
+try:
+    with open(args.googleaccount, 'r') as f:
+        google_accounts_list = [line.strip() for line in f if line.strip()]
 except FileNotFoundError:
-    pass  # Proceed with single account
+    google_accounts_list = [args.googleaccount]
 
-for google_account in google_accounts_list:
-    print(f"Processing account: {google_account}")
-    admin_client, data_client = authenticate_and_get_clients(google_account, CLIENT_SECRETS_FILE) # Pass client secrets file
 
-    properties = admin_client.list_properties(filter_=f"parent:accounts/{google_account.split('-')[0]}")
+for google_account_email in google_accounts_list:
+    print(f"Processing account: {google_account_email}")
+    admin_client, data_client = authenticate_and_get_clients(google_account_email, CLIENT_SECRETS_FILE)
+
+    if admin_client is None or data_client is None:
+        print(f"Authentication failed for {google_account_email}. Skipping.")
+        continue
+
+    try:
+        properties = admin_client.list_properties(filter_=f"parent:accounts/{google_account_email.split('@')[0]}")
+    except HttpError as err:
+        print(f"Error listing properties for {google_account_email}: {err.resp.status} {err._get_reason()}")
+        continue
+    except Exception as e:
+        print(f"An unexpected error occurred listing properties for {google_account_email}: {e}")
+        continue
+
     property_count = len(list(properties))
 
     if property_count == 0:
-        print("No accessible GA4 properties found for account %s" % (google_account))
+        print("No accessible GA4 properties found for account %s" % (google_account_email))
         continue
 
-    print(f"Processing: {google_account}")
+    print(f"Processing: {google_account_email}")
     print(f"Total GA4 properties: {property_count}")
     bar = IncrementalBar('Processing', max=property_count)
     property_counter = 0
@@ -159,7 +163,7 @@ for google_account in google_accounts_list:
         try:
             response = data_client.run_report(
                 RunReportRequest(
-                    property=f"properties/{property_.name.split('/')[-1]}",  # Use property name from list
+                    property=f"properties/{property_.name.split('/')[-1]}",
                     dimensions=[Dimension(name=dim) for dim in args.dimensions.split(",")],
                     metrics=[Metric(name=met) for met in args.metrics.split(",")],
                     date_ranges=[DateRange(start_date=args.start_date, end_date=args.end_date)],
@@ -172,7 +176,7 @@ for google_account in google_accounts_list:
                 for row in response.rows
             ])
             if not df.empty:
-                df.insert(0, 'google_account', google_account)  # Add Google Account column
+                df.insert(0, 'google_account_email', google_account_email)  # Add Google Account column
                 combined_df = pd.concat([combined_df, df], ignore_index=True)
 
         except HttpError as err:
