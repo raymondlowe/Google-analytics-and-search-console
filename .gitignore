@@ -17,3 +17,4 @@ Google-tools.py
 *.xlsx
 __pycache__/
 GACombined2-debug.py
+*.pickle
