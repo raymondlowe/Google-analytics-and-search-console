@@ -101,4 +101,4 @@ if __name__ == "__main__":
     
     ## Example usage that works
     
-    # python GA4query2.py 2024-01-01 2024-10-01 -p 313646501 -c Quickstart-1bfb41aa93a5.json -m totalAdRevenue
+    # python GA4query2.py 2024-10-01 2024-10-31 -p 313646501 -c Quickstart-1bfb41aa93a5.json -m totalAdRevenue
