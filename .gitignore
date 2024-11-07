@@ -19,3 +19,4 @@ __pycache__/
 GACombined2-debug.py
 *.pickle
 analytics*.csv
+consolidated*
