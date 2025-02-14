@@ -21,3 +21,5 @@ GACombined2-debug.py
 analytics*.csv
 consolidated*
 properties.csv
+combined*.csv
+combined*.xls

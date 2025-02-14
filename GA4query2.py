@@ -49,22 +49,8 @@ def format_report(request, property_id, property_name):
         return None
 
 
-def produce_report(start_date, end_date, property_id, property_name, credentials_path, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', name=None, test=None, wait=0):
-    """Fetches and processes data from the GA4 API for a single property.
-
-    Args:
-        start_date (str): Start date for the report (YYYY-MM-DD).
-        end_date (str): End date for the report (YYYY-MM-DD).
-        property_id (str): Google Analytics 4 property ID.
-        property_name (str): Name of the GA4 property (for reporting).
-        credentials_path (str): Path to Google Cloud credentials JSON file.
-        filter_expression (str, optional): Filter expression for the GA4 query. Defaults to None.
-        dimensions (str, optional): Dimension for the GA4 query. Defaults to 'pagePath'.
-        metrics (str, optional): Comma-separated list of metrics for the GA4 query. Defaults to 'screenPageViews'.
-        name (str, optional): Base name for output files. Defaults to None (auto-generated).
-        test (int, optional): Limit the number of results for testing. Defaults to None.
-        wait (int, optional): Wait time (in seconds, not currently used). Defaults to 0.
-    """
+def produce_report(start_date, end_date, property_id, property_name, credentials_path, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None): # Removed name arg
+    """Fetches and processes data from the GA4 API for a single property and returns DataFrame.""" # Modified docstring
     try:
         # Validate dates (add more robust date validation if needed)
         datetime.strptime(start_date, '%Y-%m-%d')
@@ -89,23 +75,17 @@ def produce_report(start_date, end_date, property_id, property_name, credentials
 
         df = format_report(request, property_id, property_name) # Pass property info to format_report
         if df is None:
-            return  # Exit if data fetch failed
+            return None  # Return None if data fetch failed, important for combining
 
         if test:
             df = df.head(test)
 
-        if name is None:
-            name = f"analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}"
-
-        output_filename_base = f"{name}_property_{property_id}_{property_name.replace(' ', '_')}" if property_name else f"{name}_property_{property_id}"
-
-        df.to_excel(f"{output_filename_base}.xlsx", index=False) # Added index=False to prevent index column in excel
-        df.to_csv(f"{output_filename_base}.csv", index=False) # Added index=False to prevent index column in csv
-        print(f"Report for property '{property_name} ({property_id})' saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
-
+        return df # Return the DataFrame instead of saving
 
     except Exception as e:
         print(f"An error occurred while processing property '{property_name} ({property_id})': {e}")
+        return None # Return None in case of error
+
 
 def is_number(s):
     """Checks if a string is a number."""
@@ -116,7 +96,7 @@ def is_number(s):
         return False
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4 for single or multiple properties.")
+    parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4 for single or multiple properties into a single output file.") # Modified description
     parser.add_argument("start_date", help="Start date (yyyy-mm-dd)")
     parser.add_argument("end_date", help="End date (yyyy-mm-dd)")
     parser.add_argument("-p", "--property_id", help="Google Analytics 4 property ID or path to CSV file with property IDs and names.", required=True)
@@ -128,6 +108,9 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", type=int, help="Limit results to n rows (for testing)", default=None)
     args = parser.parse_args()
 
+    combined_df = pd.DataFrame() # Initialize empty DataFrame to store combined data
+    output_filename_base = args.name if args.name else f"combined-analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}" # Filename for combined output
+
     if os.path.isfile(args.property_id): # Check if -p arg is a file path
         print(f"Reading property IDs from CSV file: {args.property_id}")
         try:
@@ -138,13 +121,16 @@ if __name__ == "__main__":
                 prop_id = str(row.iloc[0]) # Assuming first column is property ID
                 prop_name = str(row.iloc[1]) if properties_df.columns.size > 1 else "UnknownProperty" # Assuming second column is property name, default if not provided
 
-                print(f"\n--- Processing property from CSV ---") # ADDED PRINT STATEMENT
-                print(f"  File path check: args.property_id is a file: {os.path.isfile(args.property_id)}") # ADDED PRINT STATEMENT
-                print(f"  args.property_id (filename from command line): {args.property_id}") # ADDED PRINT STATEMENT
-                print(f"  Extracted prop_id from CSV row: {prop_id}") # ADDED PRINT STATEMENT
-                print(f"  Extracted prop_name from CSV row: {prop_name}") # ADDED PRINT STATEMENT
+                print(f"\n--- Processing property from CSV ---")
+                print(f"  File path check: args.property_id is a file: {os.path.isfile(args.property_id)}")
+                print(f"  args.property_id (filename from command line): {args.property_id}")
+                print(f"  Extracted prop_id from CSV row: {prop_id}")
+                print(f"  Extracted prop_name from CSV row: {prop_name}")
 
-                produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials, args.filter, args.dimensions, args.metrics, args.name, args.test)
+                df_property = produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials, args.filter, args.dimensions, args.metrics, args.test) # Removed name arg from call
+                if df_property is not None: # Check if DataFrame is returned successfully
+                    combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
+
 
         except FileNotFoundError:
             print(f"Error: Property ID CSV file not found: {args.property_id}")
@@ -158,16 +144,26 @@ if __name__ == "__main__":
 
     elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
         print(f"Processing single property ID: {args.property_id}")
-        produce_report(args.start_date, args.end_date, args.property_id, "SingleProperty", args.credentials, args.filter, args.dimensions, args.metrics, args.name, args.test) # Default property name
+        df_property = produce_report(args.start_date, args.end_date, args.property_id, "SingleProperty", args.credentials, args.filter, args.dimensions, args.metrics, args.test) # Removed name arg from call, default property name
+        if df_property is not None: # Check if DataFrame is returned successfully
+            combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
+
 
     else:
         print("Error: -p argument should be either a Property ID (number) or a path to a CSV file.")
 
+    if not combined_df.empty: # Save combined DataFrame only if it's not empty
+        combined_df.to_excel(f"{output_filename_base}.xlsx", index=False)
+        combined_df.to_csv(f"{output_filename_base}.csv", index=False)
+        print(f"Combined report saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
+    else:
+        print("No data to save in the combined report.")
+
 
 ## Example usage:
 
-# Single Property ID (as before)
-# python GA4query2.py 2024-10-01 2024-10-31 -p 313646501 -c Quickstart-1bfb41aa93a5.json -m totalAdRevenue
+# Single Property ID (as before - will still produce combined output, though only for one property)
+# python GA4query2.py 2024-10-01 2024-10-31 -p 313646501 -c Quickstart-1bfb41aa93a5.json -m totalAdRevenue -n my_combined_report
 
-# Multiple Property IDs from CSV (create a properties.csv with 'id,name' columns)
-# python GA4query2.py 2024-10-01 2024-10-31 -p properties.csv -c Quickstart-1bfb41aa93a5.json -m screenPageViews
+# Multiple Property IDs from CSV
+# python GA4query2.py 2024-10-01 2024-10-31 -p properties.csv -c Quickstart-1bfb41aa93a5.json -m screenPageViews -n my_combined_report
