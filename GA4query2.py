@@ -24,6 +24,7 @@ from datetime import datetime, timedelta
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest, OrderBy, FilterExpression, Filter
 from tqdm import tqdm # Import tqdm for progress bar
+import sys # Import sys for command line args
 
 def format_report(request, property_id, property_name):
     """Formats the GA4 API response into a Pandas DataFrame and adds property info."""
@@ -176,7 +177,8 @@ if __name__ == "__main__":
             'filter': [args.filter],
             'dimensions': [args.dimensions],
             'metrics': [args.metrics],
-            'test': [args.test]
+            'test': [args.test],
+            'command_line': [' '.join(sys.argv)] # Added command line argument string
         }
         params_df = pd.DataFrame(params_dict)
 
