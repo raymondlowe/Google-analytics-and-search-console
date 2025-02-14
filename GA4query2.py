@@ -34,7 +34,7 @@ def format_report(request, property_id, property_name):
             for i, dim_val in enumerate(row.dimension_values):
                 data[dimension_headers[i]].append(dim_val.value)
             for i, metric_val in enumerate(row.metric_values):
-                data[metric_headers[i]].append(str(metric_val.value)) # added str() to convert to string to handle potential issues
+                data[metric_headers[i]].append(float(metric_val.value)) # convert to float instead of string
 
         # Create DataFrame
         df = pd.DataFrame(data)
@@ -153,7 +153,24 @@ if __name__ == "__main__":
         print("Error: -p argument should be either a Property ID (number) or a path to a CSV file.")
 
     if not combined_df.empty: # Save combined DataFrame only if it's not empty
-        combined_df.to_excel(f"{output_filename_base}.xlsx", index=False)
+        # Create DataFrame from args
+        params_dict = {
+            'start_date': [args.start_date],
+            'end_date': [args.end_date],
+            'property_id': [args.property_id],
+            'credentials': [args.credentials],
+            'filter': [args.filter],
+            'dimensions': [args.dimensions],
+            'metrics': [args.metrics],
+            'test': [args.test]
+        }
+        params_df = pd.DataFrame(params_dict)
+        
+        # Save to Excel with two sheets
+        with pd.ExcelWriter(f"{output_filename_base}.xlsx") as writer:
+            combined_df.to_excel(writer, sheet_name='data', index=False)
+            params_df.to_excel(writer, sheet_name='params', index=False)
+        
         combined_df.to_csv(f"{output_filename_base}.csv", index=False)
         print(f"Combined report saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
     else:
