@@ -1,3 +1,19 @@
+# filename: GA4query2.py
+
+# This script fetches data from Google Analytics 4 (GA4) API for one or more properties
+# and outputs the combined data to both CSV and Excel files.
+
+# It can process data for a single GA4 property ID or for multiple properties listed
+# in a CSV file. The script uses the Google Analytics Data API v1beta and requires
+# credentials to authenticate with Google Cloud.
+
+# **Command Line Usage:**
+
+# To run the script, use the following command structure in your terminal:
+
+# python GA4query2.py <start_date> <end_date> -p <property_id_or_csv_path> -c <credentials_json_path> [options]
+
+
 import argparse
 import pandas as pd
 import numpy as np
@@ -111,11 +127,12 @@ if __name__ == "__main__":
 
     combined_df = pd.DataFrame() # Initialize empty DataFrame to store combined data
     output_filename_base = args.name if args.name else f"combined-analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}" # Filename for combined output
+    properties_df = None # Initialize properties_df outside the if block
 
     if os.path.isfile(args.property_id): # Check if -p arg is a file path
         print(f"Reading property IDs from CSV file: {args.property_id}")
         try:
-            properties_df = pd.read_csv(args.property_id)
+            properties_df = pd.read_csv(args.property_id) # Load properties_df here
             if properties_df.columns.size < 2:
                 raise ValueError("CSV file must contain at least two columns: property_id and property_name.")
             for index, row in tqdm(properties_df.iterrows(), total=len(properties_df), desc="Processing Properties"): # Wrap loop with tqdm
@@ -167,6 +184,8 @@ if __name__ == "__main__":
         with pd.ExcelWriter(f"{output_filename_base}.xlsx") as writer:
             combined_df.to_excel(writer, sheet_name='data', index=False)
             params_df.to_excel(writer, sheet_name='params', index=False)
+            if properties_df is not None and os.path.isfile(args.property_id): # Add properties_df to excel only if it was loaded from a file
+                properties_df.to_excel(writer, sheet_name='properties_list', index=False) # Add properties list to excel
 
         combined_df.to_csv(f"{output_filename_base}.csv", index=False)
         print(f"Combined report saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
