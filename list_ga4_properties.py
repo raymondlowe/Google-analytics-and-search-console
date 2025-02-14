@@ -6,7 +6,7 @@ from googleapiclient.discovery import build
 
 def list_ga4_properties(credentials_file):
     """Lists GA4 properties accessible with the provided credentials by iterating through accounts.
-       Correctly extracts Property ID from the 'name' field.
+       Correctly extracts Property ID from the 'name' field and now includes currencyCode.
     """
 
     try:
@@ -46,7 +46,8 @@ def list_ga4_properties(credentials_file):
                         # Extract property_id from the 'name' field:
                         property_id = property_item['name'].split('/')[-1]
                         property_name = property_item.get('displayName', 'Unknown')
-                        all_properties.append({'id': property_id, 'name': property_name, 'account_id': account_id})
+                        currency_code = property_item.get('currencyCode', 'Unknown') # Extract currencyCode
+                        all_properties.append({'id': property_id, 'name': property_name, 'account_id': account_id, 'currency_code': currency_code}) # Add currency_code
 
                     property_page_token = properties_results.get('nextPageToken')
                     if not property_page_token:
@@ -79,7 +80,7 @@ if __name__ == "__main__":
                 csv_file_path = args.output_csv
                 try:
                     with open(csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
-                        fieldnames = ['id', 'name', 'account_id'] # Define CSV header
+                        fieldnames = ['id', 'name', 'account_id', 'currency_code'] # Define CSV header, including currency_code
                         writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
 
                         writer.writeheader() # Write header row
@@ -92,6 +93,6 @@ if __name__ == "__main__":
             else: # Default output to stdout
                 print("GA4 Properties accessible with these credentials:")
                 for prop in ga4_properties:
-                    print(f"  Property ID: {prop['id']}, Name: {prop['name']}, Account ID: {prop['account_id']}")
+                    print(f"  Property ID: {prop['id']}, Name: {prop['name']}, Account ID: {prop['account_id']}, Currency Code: {prop['currency_code']}") # Include currency_code in output
         else:
             print("Could not retrieve GA4 properties or an error occurred.")
