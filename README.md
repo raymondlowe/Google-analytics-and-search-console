@@ -75,12 +75,45 @@ optional arguments:
 copy and paste these into the terminal
 
 ~~~~
-pip install argparse datetime win_unicode_console google-api-python-client pandas openpyxl progress oauth2client httplib2 progress urllib3
+pip install -r requirements.txt
 ~~~~
 
-You need a Oauth2 account and put clients_secrets.json in same folder as script
+You need a Oauth2 account and put client_secret.json in same folder as script
 https://developers.google.com/webmaster-tools/search-console-api-original/v3/quickstart/quickstart-python 
 
-If you are using multiple google accounts then for every google account "email@example.com" create a secrets file called email@example.com-clients_secrets.json
+If you are using multiple google accounts then for every google account "email@example.com" create a secrets file called email@example.com-client_secret.json
 
 For detailed instructions see the file: google-client-secrets-instructions.md
+
+## list_ga4_properties.py
+Lists details about a GA4 property, including its ID, name, and domain.
+
+~~~~
+usage: list_ga4_properties.py [-h] -c CREDENTIALS -p PROPERTY_ID [--format {table,json,csv}] [--output OUTPUT]
+
+List details about a GA4 property with its ID, name, and domain.
+
+required arguments:
+  -c CREDENTIALS, --credentials CREDENTIALS
+                        Path to Google Cloud credentials JSON file
+  -p PROPERTY_ID, --property_id PROPERTY_ID
+                        Google Analytics 4 property ID
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --format {table,json,csv}
+                        Output format (default: table)
+  --output OUTPUT       Output file path. If not provided, prints to stdout
+
+Examples:
+  # List property details in table format (default)
+  python list_ga4_properties.py -c path/to/credentials.json -p 313646501
+
+  # List property details in JSON format
+  python list_ga4_properties.py -c path/to/credentials.json -p 313646501 --format json
+
+  # Save output to a file
+  python list_ga4_properties.py -c path/to/credentials.json -p 313646501 --output properties.txt
+
+Note: Uses the same Google Cloud credentials JSON file format as GA4query2.py
+~~~~
