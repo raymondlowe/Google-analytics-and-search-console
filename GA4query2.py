@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 # import seaborn as sns
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest, OrderBy, FilterExpression, Filter
+from tqdm import tqdm # Import tqdm for progress bar
 
 def format_report(request, property_id, property_name):
     """Formats the GA4 API response into a Pandas DataFrame and adds property info."""
@@ -117,15 +118,11 @@ if __name__ == "__main__":
             properties_df = pd.read_csv(args.property_id)
             if properties_df.columns.size < 2:
                 raise ValueError("CSV file must contain at least two columns: property_id and property_name.")
-            for index, row in properties_df.iterrows():
+            for index, row in tqdm(properties_df.iterrows(), total=len(properties_df), desc="Processing Properties"): # Wrap loop with tqdm
                 prop_id = str(row.iloc[0]) # Assuming first column is property ID
                 prop_name = str(row.iloc[1]) if properties_df.columns.size > 1 else "UnknownProperty" # Assuming second column is property name, default if not provided
 
-                print(f"\n--- Processing property from CSV ---")
-                print(f"  File path check: args.property_id is a file: {os.path.isfile(args.property_id)}")
-                print(f"  args.property_id (filename from command line): {args.property_id}")
-                print(f"  Extracted prop_id from CSV row: {prop_id}")
-                print(f"  Extracted prop_name from CSV row: {prop_name}")
+                tqdm.write(f"Processing property: {prop_name} ({prop_id})") # Use tqdm.write instead of print
 
                 df_property = produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials, args.filter, args.dimensions, args.metrics, args.test) # Removed name arg from call
                 if df_property is not None: # Check if DataFrame is returned successfully
@@ -165,17 +162,16 @@ if __name__ == "__main__":
             'test': [args.test]
         }
         params_df = pd.DataFrame(params_dict)
-        
+
         # Save to Excel with two sheets
         with pd.ExcelWriter(f"{output_filename_base}.xlsx") as writer:
             combined_df.to_excel(writer, sheet_name='data', index=False)
             params_df.to_excel(writer, sheet_name='params', index=False)
-        
+
         combined_df.to_csv(f"{output_filename_base}.csv", index=False)
         print(f"Combined report saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
     else:
         print("No data to save in the combined report.")
-
 
 ## Example usage:
 

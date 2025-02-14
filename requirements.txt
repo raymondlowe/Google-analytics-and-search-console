@@ -11,3 +11,4 @@ progress
 protobuf
 tabulate
 urllib3
+tqdm
