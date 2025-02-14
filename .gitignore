@@ -20,3 +20,4 @@ GACombined2-debug.py
 *.pickle
 analytics*.csv
 consolidated*
+properties.csv

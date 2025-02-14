@@ -1,5 +1,6 @@
 import argparse
 import os
+import csv  # Import the csv module
 from google.oauth2 import service_account
 from googleapiclient.discovery import build
 
@@ -64,6 +65,7 @@ def list_ga4_properties(credentials_file):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="List GA4 properties accessible with a service account credential.")
     parser.add_argument("-c", "--credentials", help="Path to Google Cloud service account credentials JSON file", required=True)
+    parser.add_argument("-o", "--output_csv", help="Path to output CSV file. If provided, output will be written to CSV instead of stdout.") # Add CSV output argument
 
     args = parser.parse_args()
 
@@ -73,8 +75,23 @@ if __name__ == "__main__":
         ga4_properties = list_ga4_properties(args.credentials)
 
         if ga4_properties:
-            print("GA4 Properties accessible with these credentials:")
-            for prop in ga4_properties:
-                print(f"  Property ID: {prop['id']}, Name: {prop['name']}, Account ID: {prop['account_id']}")
+            if args.output_csv: # Check if output_csv argument is provided
+                csv_file_path = args.output_csv
+                try:
+                    with open(csv_file_path, 'w', newline='', encoding='utf-8') as csvfile:
+                        fieldnames = ['id', 'name', 'account_id'] # Define CSV header
+                        writer = csv.DictWriter(csvfile, fieldnames=fieldnames)
+
+                        writer.writeheader() # Write header row
+                        writer.writerows(ga4_properties) # Write data rows
+
+                    print(f"GA4 Properties written to CSV file: {csv_file_path}")
+                except Exception as e:
+                    print(f"Error writing to CSV file '{csv_file_path}': {e}")
+
+            else: # Default output to stdout
+                print("GA4 Properties accessible with these credentials:")
+                for prop in ga4_properties:
+                    print(f"  Property ID: {prop['id']}, Name: {prop['name']}, Account ID: {prop['account_id']}")
         else:
             print("Could not retrieve GA4 properties or an error occurred.")
