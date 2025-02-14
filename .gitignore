@@ -11,10 +11,15 @@ webmasters.dat
 ~$search-console2019-04-26-15-52-43.xlsx
 Dont Upload This!!.txt
 
-__pycache__/googleAPIget_service.cpython-37.pyc
 *.json
 Google-tools.py
 *.dat
 *.xlsx
-__pycache__/googleAPIget_service.cpython-38.pyc
+__pycache__/
 GACombined2-debug.py
+*.pickle
+analytics*.csv
+consolidated*
+properties.csv
+combined*.csv
+combined*.xls
