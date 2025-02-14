@@ -6,28 +6,27 @@ from datetime import datetime, timedelta
 # import matplotlib.pyplot as plt
 # import seaborn as sns
 from google.analytics.data_v1beta import BetaAnalyticsDataClient
-from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest, OrderBy
+from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest, OrderBy, FilterExpression, Filter
 
-def format_report(request):
-    """Formats the GA4 API response into a Pandas DataFrame."""
+def format_report(request, property_id, property_name):
+    """Formats the GA4 API response into a Pandas DataFrame and adds property info."""
     try:
         client = BetaAnalyticsDataClient()
         response = client.run_report(request)
 
     except Exception as e:
-        print(f"Error fetching data from GA4 API: {e}")
-        return None  # Or raise the exception, depending on your error handling strategy
+        print(f"Error fetching data from GA4 API for property {property_name} ({property_id}): {e}")
+        return None
 
-
-        if not response.rows:
-            print("No data found for this query.")
-            return pd.DataFrame()
+    if not response.rows:
+        print(f"No data found for property {property_name} ({property_id}) for this query.")
+        return pd.DataFrame()
     try:
         # Get dimension and metric headers
         dimension_headers = [header.name for header in response.dimension_headers]
         metric_headers = [header.name for header in response.metric_headers]
 
-        # Create empty lists to store data. The size of each array is determined by the response.
+        # Create empty lists to store data.
         data = {header: [] for header in dimension_headers + metric_headers}
 
         # Iterate through rows and append data
@@ -38,20 +37,33 @@ def format_report(request):
                 data[metric_headers[i]].append(str(metric_val.value)) # added str() to convert to string to handle potential issues
 
         # Create DataFrame
-        return pd.DataFrame(data)
+        df = pd.DataFrame(data)
+
+        # Add property ID and Name columns
+        df['property_id'] = property_id
+        df['property_name'] = property_name
+        return df
 
     except Exception as e:
-        print(f"An error occurred during report formatting: {e}")
+        print(f"An error occurred during report formatting for property {property_name} ({property_id}): {e}")
         return None
 
 
+def produce_report(start_date, end_date, property_id, property_name, credentials_path, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', name=None, test=None, wait=0):
+    """Fetches and processes data from the GA4 API for a single property.
 
-
-def produce_report(start_date, end_date, property_id, credentials_path, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', name=None, test=None, wait=0):
-    """Fetches and processes data from the GA4 API.
-    
     Args:
-        metrics: Single metric or comma-separated list of metrics (e.g., 'screenPageViews' or 'screenPageViews,totalAdRevenue')
+        start_date (str): Start date for the report (YYYY-MM-DD).
+        end_date (str): End date for the report (YYYY-MM-DD).
+        property_id (str): Google Analytics 4 property ID.
+        property_name (str): Name of the GA4 property (for reporting).
+        credentials_path (str): Path to Google Cloud credentials JSON file.
+        filter_expression (str, optional): Filter expression for the GA4 query. Defaults to None.
+        dimensions (str, optional): Dimension for the GA4 query. Defaults to 'pagePath'.
+        metrics (str, optional): Comma-separated list of metrics for the GA4 query. Defaults to 'screenPageViews'.
+        name (str, optional): Base name for output files. Defaults to None (auto-generated).
+        test (int, optional): Limit the number of results for testing. Defaults to None.
+        wait (int, optional): Wait time (in seconds, not currently used). Defaults to 0.
     """
     try:
         # Validate dates (add more robust date validation if needed)
@@ -71,10 +83,11 @@ def produce_report(start_date, end_date, property_id, credentials_path, filter_e
 
         # Add filter if provided
         if filter_expression:
-            filter_expression_list = [FilterExpression(filter = Filter(fieldName = filter_expression.split('=')[0], filterType = 'IN', stringValues = [filter_expression.split('=')[1]]))]
+            filter_expression_list = [FilterExpression(filter = Filter(field_name = filter_expression.split('=')[0], string_filter= {'value': filter_expression.split('=')[1]}))] # corrected filter syntax
             request.filter = filter_expression_list[0]
 
-        df = format_report(request)
+
+        df = format_report(request, property_id, property_name) # Pass property info to format_report
         if df is None:
             return  # Exit if data fetch failed
 
@@ -84,27 +97,77 @@ def produce_report(start_date, end_date, property_id, credentials_path, filter_e
         if name is None:
             name = f"analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}"
 
-        df.to_excel(f"{name}.xlsx")
-        df.to_csv(f"{name}.csv")
+        output_filename_base = f"{name}_property_{property_id}_{property_name.replace(' ', '_')}" if property_name else f"{name}_property_{property_id}"
+
+        df.to_excel(f"{output_filename_base}.xlsx", index=False) # Added index=False to prevent index column in excel
+        df.to_csv(f"{output_filename_base}.csv", index=False) # Added index=False to prevent index column in csv
+        print(f"Report for property '{property_name} ({property_id})' saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
+
 
     except Exception as e:
-        print(f"An error occurred: {e}")
+        print(f"An error occurred while processing property '{property_name} ({property_id})': {e}")
+
+def is_number(s):
+    """Checks if a string is a number."""
+    try:
+        float(s)
+        return True
+    except ValueError:
+        return False
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4.")
+    parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4 for single or multiple properties.")
     parser.add_argument("start_date", help="Start date (yyyy-mm-dd)")
     parser.add_argument("end_date", help="End date (yyyy-mm-dd)")
-    parser.add_argument("-p", "--property_id", help="Google Analytics 4 property ID", required=True)
+    parser.add_argument("-p", "--property_id", help="Google Analytics 4 property ID or path to CSV file with property IDs and names.", required=True)
     parser.add_argument("-c", "--credentials", help="Path to Google Cloud credentials JSON file", required=True)
-    parser.add_argument("-f", "--filter", help="Filter expression (e.g., 'pagePath=your_page_path')", default=None) # Changed to filter
-    parser.add_argument("-d", "--dimensions", help="Dimension (e.g., 'pagePath').  Add 'ga:' prefix", default='pagePath')
-    parser.add_argument("-m", "--metrics", help="Comma-separated list of metrics (e.g., 'screenPageViews,totalAdRevenue'). Add 'ga:' prefix", default='screenPageViews')
-    parser.add_argument("-n", "--name", help="Output file name (without extension)", default=None)
-    parser.add_argument("-t", "--test", type=int, help="Limit results to n (for testing)", default=None)
+    parser.add_argument("-f", "--filter", help="Filter expression (e.g., 'pagePath=your_page_path')", default=None)
+    parser.add_argument("-d", "--dimensions", help="Dimension (e.g., 'pagePath')", default='pagePath')
+    parser.add_argument("-m", "--metrics", help="Comma-separated list of metrics (e.g., 'screenPageViews,totalAdRevenue')", default='screenPageViews')
+    parser.add_argument("-n", "--name", help="Base output file name (without extension)", default=None)
+    parser.add_argument("-t", "--test", type=int, help="Limit results to n rows (for testing)", default=None)
     args = parser.parse_args()
-    produce_report(args.start_date, args.end_date, args.property_id, args.credentials, args.filter, args.dimensions, args.metrics, args.name, args.test)
-    
-    
-    ## Example usage that works
-    
-    # python GA4query2.py 2024-10-01 2024-10-31 -p 313646501 -c Quickstart-1bfb41aa93a5.json -m totalAdRevenue
+
+    if os.path.isfile(args.property_id): # Check if -p arg is a file path
+        print(f"Reading property IDs from CSV file: {args.property_id}")
+        try:
+            properties_df = pd.read_csv(args.property_id)
+            if properties_df.columns.size < 2:
+                raise ValueError("CSV file must contain at least two columns: property_id and property_name.")
+            for index, row in properties_df.iterrows():
+                prop_id = str(row.iloc[0]) # Assuming first column is property ID
+                prop_name = str(row.iloc[1]) if properties_df.columns.size > 1 else "UnknownProperty" # Assuming second column is property name, default if not provided
+
+                print(f"\n--- Processing property from CSV ---") # ADDED PRINT STATEMENT
+                print(f"  File path check: args.property_id is a file: {os.path.isfile(args.property_id)}") # ADDED PRINT STATEMENT
+                print(f"  args.property_id (filename from command line): {args.property_id}") # ADDED PRINT STATEMENT
+                print(f"  Extracted prop_id from CSV row: {prop_id}") # ADDED PRINT STATEMENT
+                print(f"  Extracted prop_name from CSV row: {prop_name}") # ADDED PRINT STATEMENT
+
+                produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials, args.filter, args.dimensions, args.metrics, args.name, args.test)
+
+        except FileNotFoundError:
+            print(f"Error: Property ID CSV file not found: {args.property_id}")
+        except pd.errors.EmptyDataError:
+            print(f"Error: Property ID CSV file is empty: {args.property_id}")
+        except ValueError as ve:
+            print(f"Error reading Property ID CSV file: {ve}")
+        except Exception as e:
+            print(f"An unexpected error occurred while processing Property ID CSV file: {e}")
+
+
+    elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
+        print(f"Processing single property ID: {args.property_id}")
+        produce_report(args.start_date, args.end_date, args.property_id, "SingleProperty", args.credentials, args.filter, args.dimensions, args.metrics, args.name, args.test) # Default property name
+
+    else:
+        print("Error: -p argument should be either a Property ID (number) or a path to a CSV file.")
+
+
+## Example usage:
+
+# Single Property ID (as before)
+# python GA4query2.py 2024-10-01 2024-10-31 -p 313646501 -c Quickstart-1bfb41aa93a5.json -m totalAdRevenue
+
+# Multiple Property IDs from CSV (create a properties.csv with 'id,name' columns)
+# python GA4query2.py 2024-10-01 2024-10-31 -p properties.csv -c Quickstart-1bfb41aa93a5.json -m screenPageViews
