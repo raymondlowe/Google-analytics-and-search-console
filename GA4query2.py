@@ -48,7 +48,11 @@ def format_report(request):
 
 
 def produce_report(start_date, end_date, property_id, credentials_path, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', name=None, test=None, wait=0):
-    """Fetches and processes data from the GA4 API."""
+    """Fetches and processes data from the GA4 API.
+    
+    Args:
+        metrics: Single metric or comma-separated list of metrics (e.g., 'screenPageViews' or 'screenPageViews,totalAdRevenue')
+    """
     try:
         # Validate dates (add more robust date validation if needed)
         datetime.strptime(start_date, '%Y-%m-%d')
@@ -56,10 +60,12 @@ def produce_report(start_date, end_date, property_id, credentials_path, filter_e
 
         os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = credentials_path
 
+        # Split metrics into list and create Metric objects
+        metric_list = [metric.strip() for metric in metrics.split(',')]
         request = RunReportRequest(
             property=f"properties/{property_id}",
             dimensions=[Dimension(name=dimensions)],
-            metrics=[Metric(name=metrics)],
+            metrics=[Metric(name=metric) for metric in metric_list],
             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
         )
 
@@ -92,7 +98,7 @@ if __name__ == "__main__":
     parser.add_argument("-c", "--credentials", help="Path to Google Cloud credentials JSON file", required=True)
     parser.add_argument("-f", "--filter", help="Filter expression (e.g., 'pagePath=your_page_path')", default=None) # Changed to filter
     parser.add_argument("-d", "--dimensions", help="Dimension (e.g., 'pagePath').  Add 'ga:' prefix", default='pagePath')
-    parser.add_argument("-m", "--metrics", help="Metric (e.g., 'screenPageViews'). Add 'ga:' prefix", default='screenPageViews')
+    parser.add_argument("-m", "--metrics", help="Comma-separated list of metrics (e.g., 'screenPageViews,totalAdRevenue'). Add 'ga:' prefix", default='screenPageViews')
     parser.add_argument("-n", "--name", help="Output file name (without extension)", default=None)
     parser.add_argument("-t", "--test", type=int, help="Limit results to n (for testing)", default=None)
     args = parser.parse_args()
