@@ -10,6 +10,7 @@ from google.analytics.admin_v1beta.types import ListAccountsRequest, ListPropert
 import argparse
 import pandas as pd
 from tqdm import tqdm # Import tqdm
+from dateutil.relativedelta import relativedelta # Import dateutil for date calculations
 
 # Import the Admin API client library
 from google.analytics.admin_v1beta import AnalyticsAdminServiceClient
@@ -128,15 +129,6 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
             data_rows.append(dimension_values + metric_values)
 
         df = pd.DataFrame(data_rows, columns=column_names)
-        
-        # Add property ID column
-        df.insert(0, 'property_id', property_id) # Insert as first column
-
-
-        # Convert metric columns to numeric
-        for metric in metric_names:
-            if metric in df.columns:
-                df[metric] = pd.to_numeric(df[metric], errors='coerce')
 
         return df # Return the DataFrame
 
@@ -146,7 +138,6 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
     except Exception as api_error: # Catch any errors during API interaction
         print(f"GA4 API Error for property {property_name} ({property_id}): {api_error}")
         return None
-
 
 
 def list_properties(account):
@@ -273,6 +264,22 @@ def list_properties(account):
         print(f"GA4 Admin API Error listing properties: {api_error}")
         return None
 
+def generate_date_ranges(start_month_year, end_month_year):
+    """Generates a list of date ranges from the 1st to the 28th of each month
+       between start_month_year and end_month_year (inclusive).
+       Month and year should be in YYYY-MM format.
+    """
+    ranges = []
+    current_month_year = datetime.strptime(start_month_year + '-01', '%Y-%m-%d') # Add -01 to make it a valid date
+    end_month_year_dt = datetime.strptime(end_month_year + '-01', '%Y-%m-%d')
+
+    while current_month_year <= end_month_year_dt:
+        start_date = current_month_year.strftime('%Y-%m-01')
+        end_date_dt = current_month_year + relativedelta(day=28) # Set day to 28th of the month
+        end_date = end_date_dt.strftime('%Y-%m-%d')
+        ranges.append({'start_date': start_date, 'end_date': end_date})
+        current_month_year += relativedelta(months=1) # Move to the next month
+    return ranges
 
 
 def is_number(s):
@@ -284,9 +291,11 @@ def is_number(s):
         return False
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4 for single or multiple properties into a single output file using OAuth, or list available properties.") # Modified description
-    parser.add_argument("start_date", nargs='?', help="Start date (yyyy-mm-dd)", default=None) # Made start_date and end_date optional for listing properties
-    parser.add_argument("end_date", nargs='?', help="End date (yyyy-mm-dd)", default=None) # Made start_date and end_date optional for listing properties
+    parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4 for single or multiple properties and date ranges into a single output file using OAuth, or list available properties.") # Modified description
+    parser.add_argument("start_date", nargs='?', help="Start date for single date range (yyyy-mm-dd)", default=None) # Made start_date and end_date optional and specific for single range
+    parser.add_argument("end_date", nargs='?', help="End date for single date range (yyyy-mm-dd)", default=None) # Made start_date and end_date optional and specific for single range
+    parser.add_argument("--start_month_year", help="Start month and year for multiple date ranges (YYYY-MM)", default=None) # New argument for start month-year
+    parser.add_argument("--end_month_year", help="End month and year for multiple date ranges (YYYY-MM)", default=None) # New argument for end month-year
     parser.add_argument("-p", "--property_id", help="Google Analytics 4 property ID or path to CSV file with property IDs and names.", default=None) # Made property_id optional for listing properties
     parser.add_argument("-c", "--credentials_name", help="Base name for Google Cloud OAuth credentials files (e.g., 'myproject' will look for 'myproject-credentials.json' and 'myproject-token.json')", required=True) # Changed help text for -c
     parser.add_argument("-f", "--filter", help="Filter expression (e.g., 'pagePath=your_page_path')", default=None)
@@ -307,13 +316,7 @@ if __name__ == "__main__":
         else:
             print("Failed to retrieve GA4 property list.")
     else: # Proceed with report generation if not listing properties
-        if not args.start_date or not args.end_date: # property_id is now optional, removed from required check
-            print("Error: When generating a report, start_date and end_date are required.")
-            sys.exit(1)
-
         combined_df = pd.DataFrame() # Initialize empty DataFrame to store combined data
-        # output_filename_base = args.name if args.name else f"combined-analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}" # Filename for combined output
-        
 
         if args.name:
             output_filename_base = args.name
@@ -329,77 +332,166 @@ if __name__ == "__main__":
             else:
                 property_part = f"P{args.property_id}"
             credentials_part = args.credentials_name[:10] # limit length
-            output_filename_base = f"{args.start_date}_{args.end_date}_{dimensions_part}_{metrics_part}_{property_part}_{credentials_part}_{datetime.now().strftime('%Y%m%d%H%M')}"
-        
-        
-        
+            output_filename_base = f"{dimensions_part}_{metrics_part}_{property_part}_{credentials_part}_{datetime.now().strftime('%Y%m%d%H%M')}"
+
+
         properties_df = None # Initialize properties_df outside the if block
 
-        if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
-            print("No property ID provided. Listing all available properties and running report for each.")
-            properties_df_list = list_properties(args.credentials_name)
-            if properties_df_list is not None and not properties_df_list.empty:
-                print(f"Found {len(properties_df_list)} properties. Processing reports...")
-                for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc="Processing Properties"):
-                    prop_id = str(row['property_id'])
-                    prop_name = str(row['property_name'])
-                    tqdm.write(f"Processing property: {prop_name} ({prop_id})")
-                    df_property = produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test)
-                    if df_property is not None:
-                        combined_df = pd.concat([combined_df, df_property], ignore_index=True)
-                if combined_df.empty:
-                    print("No data retrieved from any properties.")
-                else:
-                    print("Reports generated for all properties.")
 
-            elif properties_df_list is not None:
-                print("No GA4 properties found for this account. Cannot generate report.")
-            else:
-                print("Failed to retrieve GA4 property list. Cannot generate report.")
+        if args.start_month_year and args.end_month_year: # Multiple date ranges requested
+            date_ranges = generate_date_ranges(args.start_month_year, args.end_month_year)
+            print(f"Generating report for date ranges: {date_ranges}")
+            output_filename_base = f"{args.start_month_year}_{args.end_month_year}_{output_filename_base}" # Add date range to filename
+
+            for date_range in date_ranges:
+                start_date = date_range['start_date']
+                end_date = date_range['end_date']
+
+                if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
+                    print(f"No property ID provided for range {start_date} - {end_date}. Listing all available properties and running report for each.")
+                    properties_df_list = list_properties(args.credentials_name)
+                    if properties_df_list is not None and not properties_df_list.empty:
+                        print(f"Found {len(properties_df_list)} properties. Processing reports for date range {start_date} - {end_date}...")
+                        for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc=f"Processing Properties for {start_date}"):
+                            prop_id = str(row['property_id'])
+                            prop_name = str(row['property_name'])
+                            tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}")
+                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test)
+                            if df_property is not None:
+                                df_property['date'] = start_date # Add date column
+                                combined_df = pd.concat([combined_df, df_property], ignore_index=True)
+                        if combined_df.empty:
+                            print(f"No data retrieved from any properties for date range {start_date} - {end_date}.")
+                        else:
+                            print(f"Reports generated for all properties for date range {start_date} - {end_date}.")
+
+                    elif properties_df_list is not None:
+                        print(f"No GA4 properties found for this account for date range {start_date} - {end_date}. Cannot generate report.")
+                    else:
+                        print(f"Failed to retrieve GA4 property list for date range {start_date} - {end_date}. Cannot generate report.")
 
 
-        elif os.path.isfile(args.property_id): # Check if -p arg is a file path
-            print(f"Reading property IDs from CSV file: {args.property_id}")
-            try:
-                properties_df = pd.read_csv(args.property_id) # Load properties_df here
-                if properties_df.columns.size < 2:
-                    raise ValueError("CSV file must contain at least two columns: property_id and property_name.")
-                for index, row in tqdm(properties_df.iterrows(), total=len(properties_df), desc="Processing Properties"): # Wrap loop with tqdm
-                    prop_id = str(row.iloc[0]) # Assuming first column is property ID
-                    prop_name = str(row.iloc[1]) if properties_df.columns.size > 1 else "UnknownProperty" # Assuming second column is property name, default if not provided
+                elif os.path.isfile(args.property_id): # Check if -p arg is a file path
+                    print(f"Reading property IDs from CSV file: {args.property_id} for date range {start_date} - {end_date}")
+                    try:
+                        properties_df = pd.read_csv(args.property_id) # Load properties_df here
+                        if properties_df.columns.size < 2:
+                            raise ValueError("CSV file must contain at least two columns: property_id and property_name.")
+                        for index, row in tqdm(properties_df.iterrows(), total=len(properties_df), desc=f"Processing Properties for {start_date}"): # Wrap loop with tqdm
+                            prop_id = str(row.iloc[0]) # Assuming first column is property ID
+                            prop_name = str(row.iloc[1]) if properties_df.columns.size > 1 else "UnknownProperty" # Assuming second column is property name, default if not provided
 
-                    tqdm.write(f"Processing property: {prop_name} ({prop_id})") # Use tqdm.write instead of print
+                            tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}") # Use tqdm.write instead of print
 
-                    df_property = produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name
+                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name
+                            if df_property is not None: # Check if DataFrame is returned successfully
+                                df_property['date'] = start_date # Add date column
+                                combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
+
+
+                    except FileNotFoundError:
+                        print(f"Error: Property ID CSV file not found: {args.property_id} for date range {start_date} - {end_date}")
+                    except pd.errors.EmptyDataError:
+                        print(f"Error: Property ID CSV file is empty: {args.property_id} for date range {start_date} - {end_date}")
+                    except ValueError as ve:
+                        print(f"Error reading Property ID CSV file: {ve} for date range {start_date} - {end_date}")
+                    except Exception as e:
+                        print(f"An unexpected error occurred while processing Property ID CSV file: {e} for date range {start_date} - {end_date}")
+
+
+                elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
+                    print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
+                    df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name, default property name
                     if df_property is not None: # Check if DataFrame is returned successfully
+                        df_property['date'] = start_date # Add date column
                         combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
 
 
-            except FileNotFoundError:
-                print(f"Error: Property ID CSV file not found: {args.property_id}")
-            except pd.errors.EmptyDataError:
-                print(f"Error: Property ID CSV file is empty: {args.property_id}")
-            except ValueError as ve:
-                print(f"Error reading Property ID CSV file: {ve}")
-            except Exception as e:
-                print(f"An unexpected error occurred while processing Property ID CSV file: {e}")
+                else:
+                    print("Error: -p argument should be either a Property ID (number), a path to a CSV file, or omitted to process all properties.")
 
 
-        elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
-            print(f"Processing single property ID: {args.property_id}")
-            df_property = produce_report(args.start_date, args.end_date, args.property_id, "SingleProperty", args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name, default property name
-            if df_property is not None: # Check if DataFrame is returned successfully
-                combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
+        elif args.start_date and args.end_date: # Single date range requested (existing logic)
+            start_date = args.start_date
+            end_date = args.end_date
+            output_filename_base = f"{start_date}_{end_date}_{output_filename_base}" # Add date range to filename
+            if not args.start_date or not args.end_date: # property_id is now optional, removed from required check
+                print("Error: When generating a report with single date range, start_date and end_date are required.")
+                sys.exit(1)
 
 
+            if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
+                print(f"No property ID provided for range {start_date} - {end_date}. Listing all available properties and running report for each.")
+                properties_df_list = list_properties(args.credentials_name)
+                if properties_df_list is not None and not properties_df_list.empty:
+                    print(f"Found {len(properties_df_list)} properties. Processing reports for date range {start_date} - {end_date}...")
+                    for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc=f"Processing Properties for {start_date}"):
+                        prop_id = str(row['property_id'])
+                        prop_name = str(row['property_name'])
+                        tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}")
+                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test)
+                        if df_property is not None:
+                            df_property['date'] = start_date # Add date column
+                            combined_df = pd.concat([combined_df, df_property], ignore_index=True)
+                    if combined_df.empty:
+                        print(f"No data retrieved from any properties for date range {start_date} - {end_date}.")
+                    else:
+                        print(f"Reports generated for all properties for date range {start_date} - {end_date}.")
+
+                elif properties_df_list is not None:
+                    print(f"No GA4 properties found for this account for date range {start_date} - {end_date}. Cannot generate report.")
+                else:
+                    print(f"Failed to retrieve GA4 property list for date range {start_date} - {end_date}. Cannot generate report.")
+
+
+            elif os.path.isfile(args.property_id): # Check if -p arg is a file path
+                print(f"Reading property IDs from CSV file: {args.property_id} for date range {start_date} - {end_date}")
+                try:
+                    properties_df = pd.read_csv(args.property_id) # Load properties_df here
+                    if properties_df.columns.size < 2:
+                        raise ValueError("CSV file must contain at least two columns: property_id and property_name.")
+                    for index, row in tqdm(properties_df.iterrows(), total=len(properties_df), desc=f"Processing Properties for {start_date}"): # Wrap loop with tqdm
+                        prop_id = str(row.iloc[0]) # Assuming first column is property ID
+                        prop_name = str(row.iloc[1]) if properties_df.columns.size > 1 else "UnknownProperty" # Assuming second column is property name, default if not provided
+
+                        tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}") # Use tqdm.write instead of print
+
+                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name
+                        if df_property is not None: # Check if DataFrame is returned successfully
+                            df_property['date'] = start_date # Add date column
+                            combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
+
+
+                except FileNotFoundError:
+                    print(f"Error: Property ID CSV file not found: {args.property_id} for date range {start_date} - {end_date}")
+                except pd.errors.EmptyDataError:
+                    print(f"Error: Property ID CSV file is empty: {args.property_id} for date range {start_date} - {end_date}")
+                except ValueError as ve:
+                    print(f"Error reading Property ID CSV file: {ve} for date range {start_date} - {end_date}")
+                except Exception as e:
+                    print(f"An unexpected error occurred while processing Property ID CSV file: {e} for date range {start_date} - {end_date}")
+
+
+            elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
+                print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
+                df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name, default property name
+                if df_property is not None: # Check if DataFrame is returned successfully
+                    df_property['date'] = start_date # Add date column
+                    combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
+
+
+            else:
+                print("Error: -p argument should be either a Property ID (number), a path to a CSV file, or omitted to process all properties.")
         else:
-            print("Error: -p argument should be either a Property ID (number), a path to a CSV file, or omitted to process all properties.")
+            print("Error: You must specify either a single date range (start_date and end_date) or multiple date ranges (start_month_year and end_month_year).")
+            sys.exit(1)
+
 
         if not combined_df.empty: # Save combined DataFrame only if it's not empty
             # Create DataFrame from args
             params_dict = {
-                'start_date': [args.start_date],
-                'end_date': [args.end_date],
+                'start_date': [args.start_date if args.start_date else args.start_month_year], # Use month-year if single dates not provided
+                'end_date': [args.end_date if args.end_date else args.end_month_year], # Use month-year if single dates not provided
                 'property_id': [args.property_id if args.property_id else 'ALL_PROPERTIES_LISTED'], # Indicate all properties if -p is omitted
                 'credentials_name': [args.credentials_name], # Changed to credentials_name
                 'filter': [args.filter],
@@ -430,22 +522,25 @@ if __name__ == "__main__":
 # List available properties (OAuth)
 # python GA4query3.py -c my_oauth_creds -l
 
-# Single Property ID (OAuth)
+# Single Property ID (OAuth) - Single date range
 # python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -c my_oauth_creds -m totalAdRevenue -n my_oauth_report
 
-# Multiple Property IDs from CSV (OAuth)
+# Multiple Property IDs from CSV (OAuth) - Single date range
 # python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -m screenPageViews -n my_oauth_report
 
-# Run report for ALL properties (OAuth)
+# Run report for ALL properties (OAuth) - Single date range
 # python GA4query3.py 2024-10-01 2024-10-31 -c my_oauth_creds -m screenPageViews -n all_properties_report
 
+# Multiple date ranges for ALL properties
+# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -c my_oauth_creds -m screenPageViews -n monthly_report
+
+# Multiple date ranges for single property
+# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -p 313646501 -c my_oauth_creds -m screenPageViews -n monthly_report_single_prop
+
+# Multiple date ranges for properties from CSV
+# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -p properties.csv -c my_oauth_creds -m screenPageViews -n monthly_report_csv_props
 
 # Include hostname/domain in the report
 # python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
 # or for multiple properties:
 # python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
-
-# Other userful dimensions:
-# -d pagePath,pageTitle,hostname
-# -d pagePath,country,city
-# -d pagePath,deviceCategory
