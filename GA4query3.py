@@ -8,12 +8,15 @@ from google.analytics.data_v1beta import BetaAnalyticsDataClient
 from google.analytics.data_v1beta.types import DateRange, Dimension, Metric, RunReportRequest, FilterExpression, Filter
 import argparse
 import pandas as pd
-
+from tqdm import tqdm # Import tqdm
 
 
 def produce_report(start_date, end_date, property_id, property_name, account, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None):
-    """Fetches and processes data from the GA4 API for a single property and returns DataFrame using OAuth,
-       with explicit checks for file existence instead of try-except for file not found."""
+    """Fetches and processes data from the GA4 API for a single property and returns DataFrame using OAuth.
+       Allows specifying dimensions and metrics as comma-separated strings.
+       Default dimensions is 'pagePath', default metric is 'screenPageViews'.
+       To include domain/hostname in the report, use dimensions='hostname,pagePath'.
+    """
 
     # Validate dates (add more robust date validation if needed)
     try:
@@ -46,7 +49,7 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
     authorisation = None # Initialize creds to None
 
     if os.path.exists(token_file):
-        print(f"User authorisation User authorisation Token file found: {token_file}")
+        print(f"User authorisation User authorisation Token file found: ")
         try:
             authorisation = Credentials.from_authorized_user_file(token_file, SCOPES)
             print(f"Saved User authorisation authorisation loaded from token file.")
@@ -88,11 +91,13 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         client = BetaAnalyticsDataClient(credentials=authorisation) # Create client with OAuth credentials
         print("GA4 Data API client initialized.")
 
-        # Split metrics into list and create Metric objects
+        # Split metrics and dimensions into lists and create Metric/Dimension objects
         metric_list = [metric.strip() for metric in metrics.split(',')]
+        dimension_list = [dim.strip() for dim in dimensions.split(',')]
+
         request = RunReportRequest(
             property=f"properties/{property_id}",
-            dimensions=[Dimension(name=dimensions)],
+            dimensions=[Dimension(name=dimension) for dimension in dimension_list],
             metrics=[Metric(name=metric) for metric in metric_list],
             date_ranges=[DateRange(start_date=start_date, end_date=end_date)],
         )
@@ -105,8 +110,8 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         print("Sending GA4 API request...")
         response = client.run_report(request) # Fetch report using authenticated client
         print("GA4 API response received.")
-        
- 
+
+
         # --- DataFrame Conversion Logic ---
         dimension_names = [header.name for header in response.dimension_headers]
         metric_names = [header.name for header in response.metric_headers]
@@ -145,7 +150,7 @@ if __name__ == "__main__":
     parser.add_argument("-p", "--property_id", help="Google Analytics 4 property ID or path to CSV file with property IDs and names.", required=True)
     parser.add_argument("-c", "--credentials_name", help="Base name for Google Cloud OAuth credentials files (e.g., 'myproject' will look for 'myproject-credentials.json' and 'myproject-token.json')", required=True) # Changed help text for -c
     parser.add_argument("-f", "--filter", help="Filter expression (e.g., 'pagePath=your_page_path')", default=None)
-    parser.add_argument("-d", "--dimensions", help="Dimension (e.g., 'pagePath')", default='pagePath')
+    parser.add_argument("-d", "--dimensions", help="Comma-separated list of dimensions (e.g., 'pagePath,country'). To include domain/hostname, use 'hostname,pagePath'", default='pagePath')
     parser.add_argument("-m", "--metrics", help="Comma-separated list of metrics (e.g., 'screenPageViews,totalAdRevenue')", default='screenPageViews')
     parser.add_argument("-n", "--name", help="Base output file name (without extension)", default=None)
     parser.add_argument("-t", "--test", type=int, help="Limit results to n rows (for testing)", default=None)
@@ -226,3 +231,8 @@ if __name__ == "__main__":
 
 # Multiple Property IDs from CSV (OAuth)
 # python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -m screenPageViews -n my_oauth_report
+
+# Include hostname/domain in the report
+# python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
+# or for multiple properties:
+# python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
