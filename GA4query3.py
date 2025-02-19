@@ -499,6 +499,13 @@ if __name__ == "__main__":
 
 
         if not combined_df.empty: # Save combined DataFrame only if it's not empty
+            # **Insert this line to coerce metric columns to numeric:**
+            metric_columns = [metric.strip() for metric in args.metrics.split(',')]
+            for col in metric_columns:
+                if col in combined_df.columns: # Check if the column exists in the DataFrame
+                    combined_df[col] = pd.to_numeric(combined_df[col], errors='coerce') # Coerce to numeric, setting errors to NaN
+
+
             # Create DataFrame from args
             params_dict = {
                 'start_date': [args.start_date if args.start_date else args.start_month_year], # Use month-year if single dates not provided
