@@ -128,6 +128,16 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
             data_rows.append(dimension_values + metric_values)
 
         df = pd.DataFrame(data_rows, columns=column_names)
+        
+        # Add property ID column
+        df.insert(0, 'property_id', property_id) # Insert as first column
+
+
+        # Convert metric columns to numeric
+        for metric in metric_names:
+            if metric in df.columns:
+                df[metric] = pd.to_numeric(df[metric], errors='coerce')
+
         return df # Return the DataFrame
 
     except Exception as api_error:
@@ -302,7 +312,27 @@ if __name__ == "__main__":
             sys.exit(1)
 
         combined_df = pd.DataFrame() # Initialize empty DataFrame to store combined data
-        output_filename_base = args.name if args.name else f"combined-analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}" # Filename for combined output
+        # output_filename_base = args.name if args.name else f"combined-analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}" # Filename for combined output
+        
+
+        if args.name:
+            output_filename_base = args.name
+        else:
+            # Auto-generate filename
+            dimensions_part = args.dimensions.replace(',', '_')[:20] #limit length
+            metrics_part = args.metrics.replace(',', '_')[:20] #limit length
+            property_part = ""
+            if args.property_id is None:
+                property_part = "ALL_PROPERTIES"
+            elif os.path.isfile(args.property_id):
+                property_part = "MULTIPLE_PROPERTIES"
+            else:
+                property_part = f"P{args.property_id}"
+            credentials_part = args.credentials_name[:10] # limit length
+            output_filename_base = f"{args.start_date}_{args.end_date}_{dimensions_part}_{metrics_part}_{property_part}_{credentials_part}_{datetime.now().strftime('%Y%m%d%H%M')}"
+        
+        
+        
         properties_df = None # Initialize properties_df outside the if block
 
         if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
