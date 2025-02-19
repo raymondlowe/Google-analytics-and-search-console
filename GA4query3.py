@@ -11,7 +11,7 @@ import pandas as pd
 
 
 
-def produce_report(start_date, end_date, property_id, property_name, credentials_name, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None):
+def produce_report(start_date, end_date, property_id, property_name, account, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None):
     """Fetches and processes data from the GA4 API for a single property and returns DataFrame using OAuth,
        with explicit checks for file existence instead of try-except for file not found."""
 
@@ -23,8 +23,8 @@ def produce_report(start_date, end_date, property_id, property_name, credentials
         print("Error: Invalid date format. Dates must be in yyyy-mm-dd format.")
         return None
 
-    credentials_file = f"{credentials_name}-credentials.json"
-    token_file = f"{credentials_name}-token.json"
+    credentials_file = f"google-cloud-credentials.json"
+    token_file = f"{account}-token.json"
     SCOPES = ['https://www.googleapis.com/auth/analytics.readonly']
 
     print(f"Current working directory: {os.getcwd()}")
@@ -32,7 +32,7 @@ def produce_report(start_date, end_date, property_id, property_name, credentials
 
     # Explicitly check if credentials file exists
     if not os.path.exists(credentials_file):
-        print(f"Error: Credentials file '{credentials_file}' not found. Please make sure it exists in the current directory.")
+        print(f"Error: Credentials file '{credentials_file}' not found. Please make sure it exists in the current directory. You only need to do this once. You only need to do this once.")
         return None
 
     try:
@@ -43,49 +43,49 @@ def produce_report(start_date, end_date, property_id, property_name, credentials
         print(f"Error initializing OAuth flow from credentials file: {e}")
         return None
 
-    creds = None # Initialize creds to None
+    authorisation = None # Initialize creds to None
 
     if os.path.exists(token_file):
-        print(f"Token file found: {token_file}. Attempting to load credentials...")
+        print(f"User authorisation User authorisation Token file found: {token_file}")
         try:
-            creds = Credentials.from_authorized_user_file(token_file, SCOPES)
-            print(f"Credentials loaded from token file.")
+            authorisation = Credentials.from_authorized_user_file(token_file, SCOPES)
+            print(f"Saved User authorisation authorisation loaded from token file.")
         except Exception as e: # Catch errors if token file is corrupted or invalid in some way
-            print(f"Error loading credentials from token file '{token_file}': {e}")
-            creds = None # Set creds to None to force re-authentication
+            print(f"Error loading User authorisationisation from token file '{token_file}': {e}")
+            authorisation = None # Set creds to None to force re-authentication
     else:
-        print(f"Token file not found: {token_file}. Proceeding with authorization flow.")
+        print(f"Saved User authorisation Saved User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
 
-    if not creds or not creds.valid:
-        print("Credentials either not loaded or invalid. Starting authorization flow...")
-        if creds and creds.expired and creds.refresh_token:
-            print("Token expired, attempting refresh...")
+    if not authorisation or not authorisation.valid:
+        print("User authorisation either not loaded or invalid. Starting authorization flow...")
+        if authorisation and authorisation.expired and authorisation.refresh_token:
+            print("User authorisation Token expired, attempting refresh...")
             try:
-                creds.refresh(google.auth.transport.requests.Request())
-                print("Token refreshed successfully.")
+                authorisation.refresh(google.auth.transport.requests.Request())
+                print("User authorisation Token refreshed successfully.")
             except Exception as refresh_e:
-                print(f"Error refreshing token: {refresh_e}, re-authorizing...")
+                print(f"Error refreshing User authorisation token: {refresh_e}, re-authorizing...")
                 flow.run_local_server() # Re-authorize if refresh fails
-                creds = flow.credentials
+                authorisation = flow.credentials
         else:
-            print("No valid token found, running authorization flow...")
+            print("No valid User authorisation token found, running authorization flow...")
             flow.run_local_server() # Run flow to get new credentials
-            creds = flow.credentials
+            authorisation = flow.credentials
 
-        if creds and creds.valid: # Only save if creds were successfully obtained
-            print(f"Saving credentials to token file: {token_file}")
+        if authorisation and authorisation.valid: # Only save if creds were successfully obtained
+            print(f"Saving User authorisation to token file: {token_file}")
             try:
                 with open(token_file, 'w') as token:
-                    token.write(creds.to_json())
-                print("Credentials saved successfully.")
+                    token.write(authorisation.to_json())
+                print("User authorisation saved successfully.")
             except Exception as save_e:
-                print(f"Error saving credentials to token file: {save_e}")
+                print(f"Error saving User authorisation to token file: {save_e}")
         else:
-            print("Error: Could not obtain valid credentials after authorization flow.")
-            return None # Exit if no valid credentials after auth flow
+            print("Error: Could not obtain valid token after authorization flow.")
+            return None # Exit if no valid token  after auth flow
 
     try:
-        client = BetaAnalyticsDataClient(credentials=creds) # Create client with OAuth credentials
+        client = BetaAnalyticsDataClient(credentials=authorisation) # Create client with OAuth credentials
         print("GA4 Data API client initialized.")
 
         # Split metrics into list and create Metric objects
