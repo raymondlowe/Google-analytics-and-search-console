@@ -289,7 +289,6 @@ def is_number(s):
         return True
     except ValueError:
         return False
-
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Fetch and process data from Google Analytics 4 for single or multiple properties and date ranges into a single output file using OAuth, or list available properties.") # Modified description
     parser.add_argument("start_date", nargs='?', help="Start date for single date range (yyyy-mm-dd)", default=None) # Made start_date and end_date optional and specific for single range
@@ -305,6 +304,10 @@ if __name__ == "__main__":
     parser.add_argument("-t", "--test", type=int, help="Limit results to n rows (for testing)", default=None)
     parser.add_argument("-l", "--list_properties", action="store_true", help="List available GA4 properties for the current user.") # Added list_properties flag
     args = parser.parse_args()
+
+
+    properties_df = None # Initialize properties_df outside the if block
+    properties_df_list = None # Initialize properties_df_list here
 
     if args.list_properties:
         properties_df = list_properties(args.credentials_name)
@@ -332,7 +335,15 @@ if __name__ == "__main__":
             else:
                 property_part = f"P{args.property_id}"
             credentials_part = args.credentials_name[:10] # limit length
-            output_filename_base = f"{dimensions_part}_{metrics_part}_{property_part}_{credentials_part}_{datetime.now().strftime('%Y%m%d%H%M')}"
+
+            if args.start_month_year and args.end_month_year:
+                date_range_part = f"monthly_{args.start_month_year}_to_{args.end_month_year}" # More descriptive monthly range
+            elif args.start_date and args.end_date:
+                date_range_part = f"{args.start_date}_to_{args.end_date}" # Keep single date range as is
+            else:
+                date_range_part = "DATERANGE_ERROR" # Fallback, should not happen
+
+            output_filename_base = f"{date_range_part}_{dimensions_part}_{metrics_part}_{property_part}_{credentials_part}_{datetime.now().strftime('%Y%m%d%H%M')}"
 
 
         properties_df = None # Initialize properties_df outside the if block
@@ -341,7 +352,7 @@ if __name__ == "__main__":
         if args.start_month_year and args.end_month_year: # Multiple date ranges requested
             date_ranges = generate_date_ranges(args.start_month_year, args.end_month_year)
             print(f"Generating report for date ranges: {date_ranges}")
-            output_filename_base = f"{args.start_month_year}_{args.end_month_year}_{output_filename_base}" # Add date range to filename
+            # output_filename_base = f"{args.start_month_year}_{args.end_month_year}_{output_filename_base}" # No longer needed, date range in filename base now
 
             for date_range in date_ranges:
                 start_date = date_range['start_date']
@@ -414,7 +425,7 @@ if __name__ == "__main__":
         elif args.start_date and args.end_date: # Single date range requested (existing logic)
             start_date = args.start_date
             end_date = args.end_date
-            output_filename_base = f"{start_date}_{end_date}_{output_filename_base}" # Add date range to filename
+            # output_filename_base = f"{start_date}_{end_date}_{output_filename_base}" # No longer needed, date range in filename base now
             if not args.start_date or not args.end_date: # property_id is now optional, removed from required check
                 print("Error: When generating a report with single date range, start_date and end_date are required.")
                 sys.exit(1)
