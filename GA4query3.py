@@ -297,15 +297,38 @@ if __name__ == "__main__":
         else:
             print("Failed to retrieve GA4 property list.")
     else: # Proceed with report generation if not listing properties
-        if not args.start_date or not args.end_date or not args.property_id: # Check for required arguments for report
-            print("Error: When generating a report, start_date, end_date, and property_id are required.")
+        if not args.start_date or not args.end_date: # property_id is now optional, removed from required check
+            print("Error: When generating a report, start_date and end_date are required.")
             sys.exit(1)
 
         combined_df = pd.DataFrame() # Initialize empty DataFrame to store combined data
         output_filename_base = args.name if args.name else f"combined-analytics-{datetime.now().strftime('%Y%m%d%H%M%S')}" # Filename for combined output
         properties_df = None # Initialize properties_df outside the if block
 
-        if os.path.isfile(args.property_id): # Check if -p arg is a file path
+        if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
+            print("No property ID provided. Listing all available properties and running report for each.")
+            properties_df_list = list_properties(args.credentials_name)
+            if properties_df_list is not None and not properties_df_list.empty:
+                print(f"Found {len(properties_df_list)} properties. Processing reports...")
+                for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc="Processing Properties"):
+                    prop_id = str(row['property_id'])
+                    prop_name = str(row['property_name'])
+                    tqdm.write(f"Processing property: {prop_name} ({prop_id})")
+                    df_property = produce_report(args.start_date, args.end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test)
+                    if df_property is not None:
+                        combined_df = pd.concat([combined_df, df_property], ignore_index=True)
+                if combined_df.empty:
+                    print("No data retrieved from any properties.")
+                else:
+                    print("Reports generated for all properties.")
+
+            elif properties_df_list is not None:
+                print("No GA4 properties found for this account. Cannot generate report.")
+            else:
+                print("Failed to retrieve GA4 property list. Cannot generate report.")
+
+
+        elif os.path.isfile(args.property_id): # Check if -p arg is a file path
             print(f"Reading property IDs from CSV file: {args.property_id}")
             try:
                 properties_df = pd.read_csv(args.property_id) # Load properties_df here
@@ -340,14 +363,14 @@ if __name__ == "__main__":
 
 
         else:
-            print("Error: -p argument should be either a Property ID (number) or a path to a CSV file.")
+            print("Error: -p argument should be either a Property ID (number), a path to a CSV file, or omitted to process all properties.")
 
         if not combined_df.empty: # Save combined DataFrame only if it's not empty
             # Create DataFrame from args
             params_dict = {
                 'start_date': [args.start_date],
                 'end_date': [args.end_date],
-                'property_id': [args.property_id],
+                'property_id': [args.property_id if args.property_id else 'ALL_PROPERTIES_LISTED'], # Indicate all properties if -p is omitted
                 'credentials_name': [args.credentials_name], # Changed to credentials_name
                 'filter': [args.filter],
                 'dimensions': [args.dimensions],
@@ -363,6 +386,9 @@ if __name__ == "__main__":
                 params_df.to_excel(writer, sheet_name='params', index=False)
                 if properties_df is not None and os.path.isfile(args.property_id): # Add properties_df to excel only if it was loaded from a file
                     properties_df.to_excel(writer, sheet_name='properties_list', index=False) # Add properties list to excel
+                elif properties_df_list is not None and args.property_id is None: # Save listed properties if -p was omitted
+                    properties_df_list.to_excel(writer, sheet_name='properties_list', index=False)
+
 
             combined_df.to_csv(f"{output_filename_base}.csv", index=False)
             print(f"Combined report saved to {output_filename_base}.xlsx and {output_filename_base}.csv")
@@ -379,6 +405,10 @@ if __name__ == "__main__":
 
 # Multiple Property IDs from CSV (OAuth)
 # python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -m screenPageViews -n my_oauth_report
+
+# Run report for ALL properties (OAuth)
+# python GA4query3.py 2024-10-01 2024-10-31 -c my_oauth_creds -m screenPageViews -n all_properties_report
+
 
 # Include hostname/domain in the report
 # python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
