@@ -31,8 +31,8 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         print("Error: Invalid date format. Dates must be in yyyy-mm-dd format.")
         return None
 
-    credentials_file = f"google-cloud-credentials.json"
-    token_file = f"{account}-token.json"
+    credentials_file = f"google-cloud-credentials.json" # No longer using account in filename here
+    token_file = f"{account}-token.json" # Keep account in token file name for now - could also use auth_identifier
     SCOPES = ['https://www.googleapis.com/auth/analytics.readonly']
 
     print(f"Current working directory: {os.getcwd()}")
@@ -145,8 +145,8 @@ def list_properties(account):
        iterating through accounts to ensure all properties are listed.
        Corrected to use ListAccountsRequest and ListPropertiesRequest objects.
     """
-    credentials_file = f"google-cloud-credentials.json"
-    token_file = f"{account}-token.json"
+    credentials_file = f"google-cloud-credentials.json" # No longer using account name in credentials file
+    token_file = f"{account}-token.json" # Keep account in token file for now - could also use auth_identifier
     SCOPES = ['https://www.googleapis.com/auth/analytics.readonly'] # Admin API also uses this scope for read-only
 
     print(f"Current working directory: {os.getcwd()}")
@@ -296,7 +296,7 @@ if __name__ == "__main__":
     parser.add_argument("--start_month_year", help="Start month and year for multiple date ranges (YYYY-MM)", default=None) # New argument for start month-year
     parser.add_argument("--end_month_year", help="End month and year for multiple date ranges (YYYY-MM)", default=None) # New argument for end month-year
     parser.add_argument("-p", "--property_id", help="Google Analytics 4 property ID or path to CSV file with property IDs and names.", default=None) # Made property_id optional for listing properties
-    parser.add_argument("-c", "--credentials_name", help="Base name for Google Cloud OAuth credentials files (e.g., 'myproject' will look for 'myproject-credentials.json' and 'myproject-token.json')", required=True) # Changed help text for -c
+    parser.add_argument("-a", "--auth_identifier", help="Base name for Google Cloud OAuth token and credentials files (e.g., 'myproject' will look for 'myproject-credentials.json' and '[identifier]-token.json')", required=True) # Changed argument name and help text for -c
     parser.add_argument("-f", "--filter", help="Filter expression (e.g., 'pagePath=your_page_path')", default=None)
     parser.add_argument("-d", "--dimensions", help="Comma-separated list of dimensions (e.g., 'pagePath,country'). To include domain/hostname, use 'hostname,pagePath'", default='pagePath')
     parser.add_argument("-m", "--metrics", help="Comma-separated list of metrics (e.g., 'screenPageViews,totalAdRevenue')", default='screenPageViews')
@@ -310,7 +310,7 @@ if __name__ == "__main__":
     properties_df_list = None # Initialize properties_df_list here
 
     if args.list_properties:
-        properties_df = list_properties(args.credentials_name)
+        properties_df = list_properties(args.auth_identifier) # Use auth_identifier
         if properties_df is not None and not properties_df.empty:
             print("\nAvailable GA4 Properties:")
             print(properties_df.to_string(index=False))
@@ -334,7 +334,7 @@ if __name__ == "__main__":
                 property_part = "MULTIPLE_PROPERTIES"
             else:
                 property_part = f"P{args.property_id}"
-            credentials_part = args.credentials_name[:10] # limit length
+            auth_identifier_part = args.auth_identifier[:10] # limit length # Use auth_identifier
 
             if args.start_month_year and args.end_month_year:
                 date_range_part = f"monthly_{args.start_month_year}_to_{args.end_month_year}" # More descriptive monthly range
@@ -343,7 +343,7 @@ if __name__ == "__main__":
             else:
                 date_range_part = "DATERANGE_ERROR" # Fallback, should not happen
 
-            output_filename_base = f"{date_range_part}_{dimensions_part}_{metrics_part}_{property_part}_{credentials_part}_{datetime.now().strftime('%Y%m%d%H%M')}"
+            output_filename_base = f"{date_range_part}_{dimensions_part}_{metrics_part}_{property_part}_{auth_identifier_part}_{datetime.now().strftime('%Y%m%d%H%M')}" # Use auth_identifier
 
 
         properties_df = None # Initialize properties_df outside the if block
@@ -360,14 +360,14 @@ if __name__ == "__main__":
 
                 if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
                     print(f"No property ID provided for range {start_date} - {end_date}. Listing all available properties and running report for each.")
-                    properties_df_list = list_properties(args.credentials_name)
+                    properties_df_list = list_properties(args.auth_identifier) # Use auth_identifier
                     if properties_df_list is not None and not properties_df_list.empty:
                         print(f"Found {len(properties_df_list)} properties. Processing reports for date range {start_date} - {end_date}...")
                         for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc=f"Processing Properties for {start_date}"):
                             prop_id = str(row['property_id'])
                             prop_name = str(row['property_name'])
                             tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}")
-                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test)
+                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
                             if df_property is not None:
                                 df_property['date'] = start_date # Add date column
                                 combined_df = pd.concat([combined_df, df_property], ignore_index=True)
@@ -394,7 +394,7 @@ if __name__ == "__main__":
 
                             tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}") # Use tqdm.write instead of print
 
-                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name
+                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
                             if df_property is not None: # Check if DataFrame is returned successfully
                                 df_property['date'] = start_date # Add date column
                                 combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -412,7 +412,7 @@ if __name__ == "__main__":
 
                 elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
                     print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
-                    df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name, default property name
+                    df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
                     if df_property is not None: # Check if DataFrame is returned successfully
                         df_property['date'] = start_date # Add date column
                         combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -433,14 +433,14 @@ if __name__ == "__main__":
 
             if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
                 print(f"No property ID provided for range {start_date} - {end_date}. Listing all available properties and running report for each.")
-                properties_df_list = list_properties(args.credentials_name)
+                properties_df_list = list_properties(args.auth_identifier) # Use auth_identifier
                 if properties_df_list is not None and not properties_df_list.empty:
                     print(f"Found {len(properties_df_list)} properties. Processing reports for date range {start_date} - {end_date}...")
                     for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc=f"Processing Properties for {start_date}"):
                         prop_id = str(row['property_id'])
                         prop_name = str(row['property_name'])
                         tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}")
-                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test)
+                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
                         if df_property is not None:
                             df_property['date'] = start_date # Add date column
                             combined_df = pd.concat([combined_df, df_property], ignore_index=True)
@@ -467,7 +467,7 @@ if __name__ == "__main__":
 
                         tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}") # Use tqdm.write instead of print
 
-                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name
+                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
                         if df_property is not None: # Check if DataFrame is returned successfully
                             df_property['date'] = start_date # Add date column
                             combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -485,7 +485,7 @@ if __name__ == "__main__":
 
             elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
                 print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
-                df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.credentials_name, args.filter, args.dimensions, args.metrics, args.test) # Using credentials_name, default property name
+                df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
                 if df_property is not None: # Check if DataFrame is returned successfully
                     df_property['date'] = start_date # Add date column
                     combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -511,7 +511,7 @@ if __name__ == "__main__":
                 'start_date': [args.start_date if args.start_date else args.start_month_year], # Use month-year if single dates not provided
                 'end_date': [args.end_date if args.end_date else args.end_month_year], # Use month-year if single dates not provided
                 'property_id': [args.property_id if args.property_id else 'ALL_PROPERTIES_LISTED'], # Indicate all properties if -p is omitted
-                'credentials_name': [args.credentials_name], # Changed to credentials_name
+                'auth_identifier': [args.auth_identifier], # Changed to auth_identifier
                 'filter': [args.filter],
                 'dimensions': [args.dimensions],
                 'metrics': [args.metrics],
@@ -538,27 +538,27 @@ if __name__ == "__main__":
 ## Example usage:
 
 # List available properties (OAuth)
-# python GA4query3.py -c my_oauth_creds -l
+# python GA4query3.py -a my_auth_id -l # Changed to auth_identifier
 
 # Single Property ID (OAuth) - Single date range
-# python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -c my_oauth_creds -m totalAdRevenue -n my_oauth_report
+# python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -a my_auth_id -m totalAdRevenue -n my_oauth_report # Changed to auth_identifier
 
 # Multiple Property IDs from CSV (OAuth) - Single date range
-# python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -m screenPageViews -n my_oauth_report
+# python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -a my_auth_id -m screenPageViews -n my_oauth_report # Changed to auth_identifier
 
 # Run report for ALL properties (OAuth) - Single date range
-# python GA4query3.py 2024-10-01 2024-10-31 -c my_oauth_creds -m screenPageViews -n all_properties_report
+# python GA4query3.py 2024-10-01 2024-10-31 -a my_auth_id -m screenPageViews -n all_properties_report # Changed to auth_identifier
 
 # Multiple date ranges for ALL properties
-# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -c my_oauth_creds -m screenPageViews -n monthly_report
+# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -a my_auth_id -m screenPageViews -n monthly_report # Changed to auth_identifier
 
 # Multiple date ranges for single property
-# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -p 313646501 -c my_oauth_creds -m screenPageViews -n monthly_report_single_prop
+# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -p 313646501 -a my_auth_id -m screenPageViews -n monthly_report_single_prop # Changed to auth_identifier
 
 # Multiple date ranges for properties from CSV
-# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -p properties.csv -c my_oauth_creds -m screenPageViews -n monthly_report_csv_props
+# python GA4query3.py --start_month_year 2024-12 --end_month_year 2025-01 -p properties.csv -a my_auth_id -m screenPageViews -n monthly_report_csv_props # Changed to auth_identifier
 
 # Include hostname/domain in the report
-# python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
+# python GA4query3.py 2024-10-01 2024-10-31 -p 313646501 -a my_auth_id -d hostname,pagePath -m screenPageViews -n my_domain_report # Changed to auth_identifier
 # or for multiple properties:
-# python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -c my_oauth_creds -d hostname,pagePath -m screenPageViews -n my_domain_report
+# python GA4query3.py 2024-10-01 2024-10-31 -p properties.csv -a my_auth_id -d hostname,pagePath -m screenPageViews -n my_domain_report # Changed to auth_identifier
