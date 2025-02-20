@@ -16,7 +16,7 @@ from dateutil.relativedelta import relativedelta # Import dateutil for date calc
 from google.analytics.admin_v1beta import AnalyticsAdminServiceClient
 from google.analytics.admin_v1beta.types import ListPropertiesRequest # Import ListPropertiesRequest
 
-def produce_report(start_date, end_date, property_id, property_name, account, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None):
+def produce_report(start_date, end_date, property_id, property_name, account, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None, debug=False):
     """Fetches and processes data from the GA4 API for a single property and returns DataFrame using OAuth.
        Allows specifying dimensions and metrics as comma-separated strings.
        Default dimensions is 'pagePath', default metric is 'screenPageViews'.
@@ -35,8 +35,9 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
     token_file = f"{account}-token.json" # Keep account in token file name for now - could also use auth_identifier
     SCOPES = ['https://www.googleapis.com/auth/analytics.readonly']
 
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Looking for credentials file: {credentials_file}")
+    if debug:
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Looking for credentials file: {credentials_file}")
 
     # Explicitly check if credentials file exists
     if not os.path.exists(credentials_file):
@@ -45,8 +46,9 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
 
     try:
         flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-        print(f"Loaded client secrets from file: {credentials_file}")
-        print(f"Flow object created: {flow}")
+        if debug:
+            print(f"Loaded client secrets from file: {credentials_file}")
+            print(f"Flow object created: {flow}")
     except Exception as e:  # Catch any potential errors during flow creation (less likely FileNotFoundError now)
         print(f"Error initializing OAuth flow from credentials file: {e}")
         return None
@@ -54,38 +56,47 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
     authorisation = None # Initialize creds to None
 
     if os.path.exists(token_file):
-        print(f"User authorisation User authorisation Token file found: ")
+        if debug:
+            print(f"User authorisation User authorisation Token file found: ")
         try:
             authorisation = Credentials.from_authorized_user_file(token_file, SCOPES)
-            print(f"Saved User authorisation authorisation loaded from token file.")
+            if debug:
+                print(f"Saved User authorisation authorisation loaded from token file.")
         except Exception as e: # Catch errors if token file is corrupted or invalid in some way
             print(f"Error loading User authorisationisation from token file '{token_file}': {e}")
             authorisation = None # Set creds to None to force re-authentication
     else:
-        print(f"Saved User authorisation Saved User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
+        if debug:
+            print(f"Saved User authorisation Saved User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
 
     if not authorisation or not authorisation.valid:
-        print("User authorisation either not loaded or invalid. Starting authorization flow...")
+        if debug:
+            print("User authorisation either not loaded or invalid. Starting authorization flow...")
         if authorisation and authorisation.expired and authorisation.refresh_token:
-            print("User authorisation Token expired, attempting refresh...")
+            if debug:
+                print("User authorisation Token expired, attempting refresh...")
             try:
                 authorisation.refresh(google.auth.transport.requests.Request())
-                print("User authorisation Token refreshed successfully.")
+                if debug:
+                    print("User authorisation Token refreshed successfully.")
             except Exception as refresh_e:
                 print(f"Error refreshing User authorisation token: {refresh_e}, re-authorizing...")
                 flow.run_local_server() # Re-authorize if refresh fails
                 authorisation = flow.credentials
         else:
-            print("No valid User authorisation token found, running authorization flow...")
+            if debug:
+                print("No valid User authorisation token found, running authorization flow...")
             flow.run_local_server() # Run flow to get new credentials
             authorisation = flow.credentials
 
         if authorisation and authorisation.valid: # Only save if creds were successfully obtained
-            print(f"Saving User authorisation to token file: {token_file}")
+            if debug:
+                print(f"Saving User authorisation to token file: {token_file}")
             try:
                 with open(token_file, 'w') as token:
                     token.write(authorisation.to_json())
-                print("User authorisation saved successfully.")
+                if debug:
+                    print("User authorisation saved successfully.")
             except Exception as save_e:
                 print(f"Error saving User authorisation to token file: {save_e}")
         else:
@@ -94,7 +105,8 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
 
     try:
         client = BetaAnalyticsDataClient(credentials=authorisation) # Create client with OAuth credentials
-        print("GA4 Data API client initialized.")
+        if debug:
+            print("GA4 Data API client initialized.")
 
         # Split metrics and dimensions into lists and create Metric/Dimension objects
         metric_list = [metric.strip() for metric in metrics.split(',')]
@@ -112,9 +124,11 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
             filter_expression_list = [FilterExpression(filter = Filter(field_name = filter_expression.split('=')[0], string_filter= {'value': filter_expression.split('=')[1]}))] # corrected filter syntax
             request.filter = filter_expression_list[0]
 
-        print("Sending GA4 API request...")
+        if debug:
+            print("Sending GA4 API request...")
         response = client.run_report(request) # Fetch report using authenticated client
-        print("GA4 API response received.")
+        if debug:
+            print("GA4 API response received.")
 
 
         # --- DataFrame Conversion Logic ---
@@ -140,7 +154,7 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         return None
 
 
-def list_properties(account):
+def list_properties(account, debug=False):
     """Lists available GA4 properties for the authenticated user using Admin API,
        iterating through accounts to ensure all properties are listed.
        Corrected to use ListAccountsRequest and ListPropertiesRequest objects.
@@ -149,8 +163,9 @@ def list_properties(account):
     token_file = f"{account}-token.json" # Keep account in token file for now - could also use auth_identifier
     SCOPES = ['https://www.googleapis.com/auth/analytics.readonly'] # Admin API also uses this scope for read-only
 
-    print(f"Current working directory: {os.getcwd()}")
-    print(f"Looking for credentials file: {credentials_file}")
+    if debug:
+        print(f"Current working directory: {os.getcwd()}")
+        print(f"Looking for credentials file: {credentials_file}")
 
     # Explicitly check if credentials file exists
     if not os.path.exists(credentials_file):
@@ -161,46 +176,56 @@ def list_properties(account):
 
     try:
         flow = InstalledAppFlow.from_client_secrets_file(credentials_file, SCOPES)
-        print(f"Loaded client secrets from file: {credentials_file}")
-        print(f"Flow object created: {flow}")
+        if debug:
+            print(f"Loaded client secrets from file: {credentials_file}")
+            print(f"Flow object created: {flow}")
     except Exception as e:
         print(f"Error initializing OAuth flow from credentials file: {e}")
         return None # Exit here if credentials file loading fails
 
 
     if os.path.exists(token_file):
-        print(f"User authorisation Token file found: {token_file}")
+        if debug:
+            print(f"User authorisation Token file found: {token_file}")
         try:
             authorisation = Credentials.from_authorized_user_file(token_file, SCOPES)
-            print(f"User authorisation loaded from token file.")
+            if debug:
+                print(f"User authorisation loaded from token file.")
         except Exception as e:
             print(f"Error loading User authorisation from token file '{token_file}': {e}")
             authorisation = None
     else:
-        print(f"User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
+        if debug:
+            print(f"User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
 
     if not authorisation or not authorisation.valid:
-        print("User authorisation either not loaded or invalid. Starting authorization flow...")
+        if debug:
+            print("User authorisation either not loaded or invalid. Starting authorization flow...")
         if authorisation and authorisation.expired and authorisation.refresh_token:
-            print("User authorisation Token expired, attempting refresh...")
+            if debug:
+                print("User authorisation Token expired, attempting refresh...")
             try:
                 authorisation.refresh(google.auth.transport.requests.Request())
-                print("User authorisation Token refreshed successfully.")
+                if debug:
+                    print("User authorisation Token refreshed successfully.")
             except Exception as refresh_e:
                 print(f"Error refreshing User authorisation token: {refresh_e}, re-authorizing...")
                 flow.run_local_server()
                 authorisation = flow.credentials
         else:
-            print("No valid User authorisation token found, running authorization flow...")
+            if debug:
+                print("No valid User authorisation token found, running authorization flow...")
             flow.run_local_server()
             authorisation = flow.credentials
 
         if authorisation and authorisation.valid:
-            print(f"Saving User authorisation to token file: {token_file}")
+            if debug:
+                print(f"Saving User authorisation to token file: {token_file}")
             try:
                 with open(token_file, 'w') as token:
                     token.write(authorisation.to_json())
-                print("User authorisation saved successfully.")
+                if debug:
+                    print("User authorisation saved successfully.")
             except Exception as save_e:
                 print(f"Error saving User authorisation to token file: {save_e}")
         else:
@@ -210,7 +235,8 @@ def list_properties(account):
     try:
         # Initialize Admin API client
         client = AnalyticsAdminServiceClient(credentials=authorisation)
-        print("GA4 Admin API client initialized for property listing.")
+        if debug:
+            print("GA4 Admin API client initialized for property listing.")
 
         all_properties = []
 
@@ -229,6 +255,8 @@ def list_properties(account):
 
             for account in accounts:
                 account_id = account.name.split('/')[-1] # Extract account ID from account.name
+                if debug:
+                    print(f"Processing account: {account_id}")
 
                 # 2. List Properties under each Account
                 property_page_token = None
@@ -248,6 +276,8 @@ def list_properties(account):
                         property_id = property.name.split('/')[-1] # Extract property_id from property.name
                         property_name = property.display_name
                         all_properties.append({'property_id': property_id, 'property_name': property_name})
+                        if debug:
+                            print(f"  Found property: {property_name} ({property_id})")
 
                     property_page_token = properties_results.next_page_token
                     if not property_page_token:
@@ -303,6 +333,7 @@ if __name__ == "__main__":
     parser.add_argument("-n", "--name", help="Base output file name (without extension)", default=None)
     parser.add_argument("-t", "--test", type=int, help="Limit results to n rows (for testing)", default=None)
     parser.add_argument("-l", "--list_properties", action="store_true", help="List available GA4 properties for the current user.") # Added list_properties flag
+    parser.add_argument("--debug", action="store_true", help="Enable debug output to show verbose messages.") # Added debug flag
     args = parser.parse_args()
 
 
@@ -310,7 +341,7 @@ if __name__ == "__main__":
     properties_df_list = None # Initialize properties_df_list here
 
     if args.list_properties:
-        properties_df = list_properties(args.auth_identifier) # Use auth_identifier
+        properties_df = list_properties(args.auth_identifier, debug=args.debug) # Use auth_identifier and debug flag
         if properties_df is not None and not properties_df.empty:
             print("\nAvailable GA4 Properties:")
             print(properties_df.to_string(index=False))
@@ -351,7 +382,8 @@ if __name__ == "__main__":
 
         if args.start_month_year and args.end_month_year: # Multiple date ranges requested
             date_ranges = generate_date_ranges(args.start_month_year, args.end_month_year)
-            print(f"Generating report for date ranges: {date_ranges}")
+            if args.debug:
+                print(f"Generating report for date ranges: {date_ranges}")
             # output_filename_base = f"{args.start_month_year}_{args.end_month_year}_{output_filename_base}" # No longer needed, date range in filename base now
 
             for date_range in date_ranges:
@@ -360,14 +392,14 @@ if __name__ == "__main__":
 
                 if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
                     print(f"No property ID provided for range {start_date} - {end_date}. Listing all available properties and running report for each.")
-                    properties_df_list = list_properties(args.auth_identifier) # Use auth_identifier
+                    properties_df_list = list_properties(args.auth_identifier, debug=args.debug) # Use auth_identifier and debug flag
                     if properties_df_list is not None and not properties_df_list.empty:
                         print(f"Found {len(properties_df_list)} properties. Processing reports for date range {start_date} - {end_date}...")
                         for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc=f"Processing Properties for {start_date}"):
                             prop_id = str(row['property_id'])
                             prop_name = str(row['property_name'])
                             tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}")
-                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
+                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test, debug=args.debug) # Use auth_identifier and debug flag
                             if df_property is not None:
                                 df_property['date'] = start_date # Add date column
                                 combined_df = pd.concat([combined_df, df_property], ignore_index=True)
@@ -394,7 +426,7 @@ if __name__ == "__main__":
 
                             tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}") # Use tqdm.write instead of print
 
-                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
+                            df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test, debug=args.debug) # Use auth_identifier and debug flag
                             if df_property is not None: # Check if DataFrame is returned successfully
                                 df_property['date'] = start_date # Add date column
                                 combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -411,8 +443,9 @@ if __name__ == "__main__":
 
 
                 elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
-                    print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
-                    df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
+                    if args.debug:
+                        print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
+                    df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test, debug=args.debug) # Use auth_identifier and debug flag
                     if df_property is not None: # Check if DataFrame is returned successfully
                         df_property['date'] = start_date # Add date column
                         combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -433,14 +466,14 @@ if __name__ == "__main__":
 
             if args.property_id is None: # Handle case where property_id is missing - list properties and run for all
                 print(f"No property ID provided for range {start_date} - {end_date}. Listing all available properties and running report for each.")
-                properties_df_list = list_properties(args.auth_identifier) # Use auth_identifier
+                properties_df_list = list_properties(args.auth_identifier, debug=args.debug) # Use auth_identifier and debug flag
                 if properties_df_list is not None and not properties_df_list.empty:
                     print(f"Found {len(properties_df_list)} properties. Processing reports for date range {start_date} - {end_date}...")
                     for index, row in tqdm(properties_df_list.iterrows(), total=len(properties_df_list), desc=f"Processing Properties for {start_date}"):
                         prop_id = str(row['property_id'])
                         prop_name = str(row['property_name'])
                         tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}")
-                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
+                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test, debug=args.debug) # Use auth_identifier and debug flag
                         if df_property is not None:
                             df_property['date'] = start_date # Add date column
                             combined_df = pd.concat([combined_df, df_property], ignore_index=True)
@@ -467,7 +500,7 @@ if __name__ == "__main__":
 
                         tqdm.write(f"Processing property: {prop_name} ({prop_id}) for date range {start_date} - {end_date}") # Use tqdm.write instead of print
 
-                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
+                        df_property = produce_report(start_date, end_date, prop_id, prop_name, args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test, debug=args.debug) # Use auth_identifier and debug flag
                         if df_property is not None: # Check if DataFrame is returned successfully
                             df_property['date'] = start_date # Add date column
                             combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
@@ -484,8 +517,9 @@ if __name__ == "__main__":
 
 
             elif is_number(args.property_id): # If -p arg is a number, treat as single property ID
-                print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
-                df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test) # Use auth_identifier
+                if args.debug:
+                    print(f"Processing single property ID: {args.property_id} for date range {start_date} - {end_date}")
+                df_property = produce_report(start_date, end_date, args.property_id, "SingleProperty", args.auth_identifier, args.filter, args.dimensions, args.metrics, args.test, debug=args.debug) # Use auth_identifier and debug flag
                 if df_property is not None: # Check if DataFrame is returned successfully
                     df_property['date'] = start_date # Add date column
                     combined_df = pd.concat([combined_df, df_property], ignore_index=True) # Append to combined DataFrame
