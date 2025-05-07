@@ -86,7 +86,13 @@ for thisgoogleaccount in googleaccountslist:
     for item in profiles['siteEntry']:
         bar.next()
         if item['permissionLevel'] != 'siteUnverifiedUser':
+            # Parse the hostname
+            rootDomain = urlparse(item['siteUrl']).hostname
 
+            # Skip if rootDomain is None (likely a "Domain" property)
+            if rootDomain is None:
+                print(f"Skipping domain property: {item['siteUrl']}")
+                continue
             smalldf = pd.DataFrame()
             if wait_seconds > 0:
                 # print("Sleeping %4d seconds" % (wait_seconds))
