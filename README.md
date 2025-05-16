@@ -37,7 +37,7 @@ optional arguments:
                         together into a file file
 
 ~~~~
-## GACombined2.py      
+## GACombined2.py
 
 This script download from Google Analytics but ***ONLY*** views which are marked as starred/fav
 
@@ -71,16 +71,82 @@ optional arguments:
                         all results appended together into a file file
 
 ~~~~
+
+## GA4query2.py
+
+This script fetches data from Google Analytics 4 (GA4) API for one or more properties and outputs the combined data to both CSV and Excel files.
+
+~~~~
+usage: GA4query2.py [-h] [-p PROPERTY_ID] [-c CREDENTIALS] [-f FILTER]
+                    [-d DIMENSIONS] [-m METRICS] [-n NAME] [-t TEST]
+                    start_date end_date
+
+positional arguments:
+  start_date            Start date (yyyy-mm-dd)
+  end_date              End date (yyyy-mm-dd)
+
+optional arguments:
+  -h, --help            show this help message and exit
+  -p PROPERTY_ID, --property_id PROPERTY_ID
+                        Google Analytics 4 property ID or path to CSV file
+                        with property IDs and names.
+  -c CREDENTIALS, --credentials CREDENTIALS
+                        Path to Google Cloud credentials JSON file
+  -f FILTER, --filter FILTER
+                        Filter expression (e.g., 'pagePath=your_page_path')
+  -d DIMENSIONS, --dimensions DIMENSIONS
+                        Dimension (e.g., 'pagePath')
+  -m METRICS, --metrics METRICS
+                        Comma-separated list of metrics (e.g.,
+                        'screenPageViews,totalAdRevenue')
+  -n NAME, --name NAME  Base output file name (without extension)
+  -t TEST, --test TEST  Limit results to n rows (for testing)
+~~~~
+
+
 #pip commands
 copy and paste these into the terminal
 
 ~~~~
-pip install argparse datetime win_unicode_console google-api-python-client pandas openpyxl progress oauth2client httplib2 progress urllib3
+pip install -r requirements.txt
 ~~~~
 
-You need a Oauth2 account and put clients_secrets.json in same folder as script
-https://developers.google.com/webmaster-tools/search-console-api-original/v3/quickstart/quickstart-python 
+You need a Oauth2 account and put client_secret.json in same folder as script
+https://developers.google.com/webmaster-tools/search-console-api-original/v3/quickstart/quickstart-python
 
-If you are using multiple google accounts then for every google account "email@example.com" create a secrets file called email@example.com-clients_secrets.json
+If you are using multiple google accounts then for every google account "email@example.com" create a secrets file called email@example.com-client_secret.json
 
 For detailed instructions see the file: google-client-secrets-instructions.md
+
+## list_ga4_properties.py
+Lists details about a GA4 property, including its ID, name, and domain.
+
+~~~~
+usage: list_ga4_properties.py [-h] -c CREDENTIALS -p PROPERTY_ID [--format {table,json,csv}] [--output OUTPUT]
+
+List details about a GA4 property with its ID, name, and domain.
+
+required arguments:
+  -c CREDENTIALS, --credentials CREDENTIALS
+                        Path to Google Cloud credentials JSON file
+  -p PROPERTY_ID, --property_id PROPERTY_ID
+                        Google Analytics 4 property ID
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --format {table,json,csv}
+                        Output format (default: table)
+  --output OUTPUT       Output file path. If not provided, prints to stdout
+
+Examples:
+  # List property details in table format (default)
+  python list_ga4_properties.py -c path/to/credentials.json -p 313646501
+
+  # List property details in JSON format
+  python list_ga4_properties.py -c path/to/credentials.json -p 313646501 --format json
+
+  # Save output to a file
+  python list_ga4_properties.py -c path/to/credentials.json -p 313646501 --output properties.txt
+
+Note: Uses the same Google Cloud credentials JSON file format as GA4query2.py
+~~~~
