@@ -111,7 +111,7 @@ for thisgoogleaccount in googleaccountslist:
             if len(results) == 2:
                 #print(results['rows'])
                 #print(smalldf)
-                smalldf = smalldf.append(results['rows'])
+                smalldf = smalldf._append(results['rows'])
                 #print(smalldf)
 
                 if multidimention:
