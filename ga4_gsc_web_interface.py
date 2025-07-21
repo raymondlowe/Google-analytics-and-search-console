@@ -73,7 +73,7 @@ def get_ga4_data(start_date, end_date, property_id, auth_identifier, dimensions,
         return None, f"Error fetching GA4 data: {str(e)}"
 
 
-def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, wait_seconds, debug, domain_filter=None):
+def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, wait_seconds, debug, domain_filter=None, max_retries=3, retry_delay=5):
     """
     Fetch Google Search Console data using NewDownloads module
     """
@@ -88,7 +88,9 @@ def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, 
             google_account=account_to_use,
             wait_seconds=wait_seconds,
             debug=debug,
-            domain_filter=domain_filter
+            domain_filter=domain_filter,
+            max_retries=max_retries,
+            retry_delay=retry_delay
         )
         
         if df is not None and not df.empty:
@@ -102,7 +104,7 @@ def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, 
 
 def query_data(data_source, start_date, end_date, ga4_property_id, ga4_auth_id, ga4_dimensions, 
                ga4_metrics, ga4_filter, gsc_account, gsc_search_type, gsc_dimensions, 
-               gsc_wait_seconds, gsc_domain_filter, debug_mode):
+               gsc_wait_seconds, gsc_domain_filter, gsc_max_retries, gsc_retry_delay, debug_mode):
     """
     Main function to query data based on selected source
     """
@@ -123,7 +125,7 @@ def query_data(data_source, start_date, end_date, ga4_property_id, ga4_auth_id, 
         gsc_domain_to_use = gsc_domain_filter.strip() if gsc_domain_filter and gsc_domain_filter.strip() else None
         df, message = get_gsc_data(
             start_date, end_date, gsc_account_to_use, gsc_search_type, 
-            gsc_dimensions, gsc_wait_seconds, debug_mode, gsc_domain_to_use
+            gsc_dimensions, gsc_wait_seconds, debug_mode, gsc_domain_to_use, gsc_max_retries, gsc_retry_delay
         )
     
     return df, message
@@ -270,6 +272,22 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
                     info="Delay between API calls to prevent quota issues"
                 )
                 
+                gsc_max_retries = gr.Number(
+                    label="Max Retries",
+                    value=3,
+                    minimum=0,
+                    maximum=10,
+                    info="Maximum retry attempts for failed API calls"
+                )
+                
+                gsc_retry_delay = gr.Number(
+                    label="Retry Delay (seconds)",
+                    value=5,
+                    minimum=1,
+                    maximum=60,
+                    info="Base delay for retry attempts (uses exponential backoff)"
+                )
+                
                 list_gsc_domains_btn = gr.Button("List Available GSC Domains")
             
             # Query button
@@ -362,7 +380,7 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
         inputs=[
             data_source, start_date, end_date, ga4_property_id, ga4_auth_id, 
             ga4_dimensions, ga4_metrics, ga4_filter, gsc_account, gsc_search_type, 
-            gsc_dimensions, gsc_wait_seconds, gsc_domain_filter, debug_mode
+            gsc_dimensions, gsc_wait_seconds, gsc_domain_filter, gsc_max_retries, gsc_retry_delay, debug_mode
         ],
         outputs=[status_text, data_table, download_btn, properties_table, gsc_domains_table]
     )
@@ -405,7 +423,9 @@ def api_query_data(source, start_date, end_date, **kwargs):
             dimensions=kwargs.get('dimensions', 'page'),
             wait_seconds=kwargs.get('wait_seconds', 0),
             debug=kwargs.get('debug', False),
-            domain_filter=kwargs.get('domain_filter')
+            domain_filter=kwargs.get('domain_filter'),
+            max_retries=kwargs.get('max_retries', 3),
+            retry_delay=kwargs.get('retry_delay', 5)
         )
     
     if df is not None:

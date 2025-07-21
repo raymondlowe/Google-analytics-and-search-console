@@ -99,7 +99,9 @@ def fetch_search_console_data(
     google_account="",
     wait_seconds=0,
     debug=False,
-    domain_filter=None
+    domain_filter=None,
+    max_retries=3,
+    retry_delay=5
 ):
     """
     Fetch data from Google Search Console API.
@@ -113,6 +115,8 @@ def fetch_search_console_data(
         wait_seconds (int): Wait seconds between API calls to prevent quota problems
         debug (bool): Enable debug output
         domain_filter (str): Optional domain to filter results (e.g., 'example.com')
+        max_retries (int): Maximum number of retry attempts for failed API calls
+        retry_delay (int): Base delay in seconds for retry attempts (with exponential backoff)
         
     Returns:
         pandas.DataFrame: Combined search console data from all accessible properties
@@ -201,35 +205,75 @@ def fetch_search_console_data(
                 
                 if debug:
                     print(f"Querying {item['siteUrl']} from {start_date} to {end_date}")
-                    
-                results = service.searchanalytics().query(
-                    siteUrl=item['siteUrl'], body={
-                        'startDate': start_date,
-                        'endDate': end_date,
-                        'dimensions': dimensions_array,
-                        'searchType': search_type,
-                        'rowLimit': 25000
-                    }).execute()
                 
-                if len(results) == 2:
-                    small_df = small_df._append(results['rows'])
-                    
-                    if multi_dimension:
-                        # solves key1 reserved word problem
-                        small_df[['key-1','key-2']] = pd.DataFrame(small_df['keys'].tolist(), index=small_df.index)
-                        small_df['keys']
-                    
-                    root_domain = urlparse(item['siteUrl']).hostname
-                    if 'www.' in root_domain:
-                        root_domain = root_domain.replace('www.','')
-                    
-                    small_df.insert(0,'siteUrl',item['siteUrl'])
-                    small_df.insert(0,'rootDomain',root_domain)
-                    
-                    if len(big_df.columns) == 0:
-                        big_df = small_df.copy()
-                    else:
-                        big_df = pd.concat([big_df,small_df])
+                # Add error handling for individual domain API calls with retry logic
+                retry_count = 0
+                success = False
+                
+                while retry_count <= max_retries and not success:
+                    try:
+                        if retry_count > 0:
+                            # Exponential backoff for retries
+                            backoff_delay = retry_delay * (2 ** (retry_count - 1))
+                            if debug:
+                                print(f"Retrying {item['siteUrl']} (attempt {retry_count}/{max_retries}) after {backoff_delay}s delay")
+                            time.sleep(backoff_delay)
+                        
+                        results = service.searchanalytics().query(
+                            siteUrl=item['siteUrl'], body={
+                                'startDate': start_date,
+                                'endDate': end_date,
+                                'dimensions': dimensions_array,
+                                'searchType': search_type,
+                                'rowLimit': 25000
+                            }).execute()
+                        
+                        success = True  # Mark as successful if we get here
+                        
+                        if len(results) == 2:
+                            small_df = small_df._append(results['rows'])
+                            
+                            if multi_dimension:
+                                # solves key1 reserved word problem
+                                small_df[['key-1','key-2']] = pd.DataFrame(small_df['keys'].tolist(), index=small_df.index)
+                                small_df['keys']
+                            
+                            root_domain = urlparse(item['siteUrl']).hostname
+                            if 'www.' in root_domain:
+                                root_domain = root_domain.replace('www.','')
+                            
+                            small_df.insert(0,'siteUrl',item['siteUrl'])
+                            small_df.insert(0,'rootDomain',root_domain)
+                            
+                            if len(big_df.columns) == 0:
+                                big_df = small_df.copy()
+                            else:
+                                big_df = pd.concat([big_df,small_df])
+                        elif debug:
+                            print(f"No data returned for {item['siteUrl']}")
+                            
+                    except Exception as e:
+                        retry_count += 1
+                        error_msg = f"Error fetching data for {item['siteUrl']} (attempt {retry_count}/{max_retries + 1}): {str(e)}"
+                        
+                        # Check if this is a rate limiting or server error that we should retry
+                        error_str = str(e).lower()
+                        should_retry = (retry_count <= max_retries and 
+                                      ('rate' in error_str or 'quota' in error_str or 
+                                       'timeout' in error_str or 'internal error' in error_str or
+                                       '500' in error_str or '503' in error_str or '429' in error_str))
+                        
+                        if should_retry:
+                            if debug:
+                                print(f"Retryable error: {error_msg}")
+                        else:
+                            # Final failure or non-retryable error
+                            if debug:
+                                print(f"Final error: {error_msg}")
+                            else:
+                                # Always show important failures even when not in debug mode
+                                print(f"Warning: {error_msg}")
+                            break
         
         bar.finish()
         
@@ -305,6 +349,8 @@ if __name__ == "__main__":
     parser.add_argument("-w","--wait",type=int, default=0, help="Wait in seconds between API calls to prevent quota problems; default 0 seconds")
     parser.add_argument("-s","--domain",type=str, default="", help="Filter results to a specific domain (e.g., 'example.com'). If not specified, data from all accessible domains will be downloaded.")
     parser.add_argument("--list-domains", action="store_true", help="List all available Search Console domains/sites and exit")
+    parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts for failed API calls; default 3")
+    parser.add_argument("--retry-delay", type=int, default=5, help="Base delay in seconds for retry attempts (uses exponential backoff); default 5")
 
     args = parser.parse_args()
 
@@ -343,7 +389,9 @@ if __name__ == "__main__":
         google_account=googleaccountstring,
         wait_seconds=wait_seconds,
         debug=True,
-        domain_filter=domain_filter
+        domain_filter=domain_filter,
+        max_retries=args.max_retries,
+        retry_delay=args.retry_delay
     )
     
     # Save the data if we got any
