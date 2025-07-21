@@ -1,152 +1,122 @@
-# Google-analytics-and-search-console
-These script can scrape Google analytics and the Google search console for info about your websites.
 
-# Usage
+# Google Analytics & Search Console Reporting Tools
 
-## NewDownloads.py
-~~~~
-usage: NewDownloads.py [-h] [-t {image,video,web}] [-d DIMENSIONS] [-n NAME]
-                       [-g GOOGLEACCOUNT]
-                       start_date end_date
+This repo contains two main tools for downloading reports:
 
-positional arguments:
-  start_date            start date in format yyyy-mm-dd or 'yesterday'
-                        '7DaysAgo'
-  end_date              start date in format yyyy-mm-dd or 'today'
+## 1. Google Search Console: `NewDownloads.py`
 
-optional arguments:
-  -h, --help            show this help message and exit
-  -t {image,video,web}, --type {image,video,web}
-                        Search types for the returned data, default is web
-  -d DIMENSIONS, --dimensions DIMENSIONS
-                        The dimensions are the left hand side of the table,
-                        default is page. Options are date, query, page,
-                        country, device. Combine two by specifying -d
-                        page,query
-  -n NAME, --name NAME  File name for final output, default is search-console-
-                        + the current date. You do NOT need to add file
-                        extension
-  -g GOOGLEACCOUNT, --googleaccount GOOGLEACCOUNT
-                        Name of a google account; does not have to literally
-                        be the account name but becomes a token to access that
-                        particular set of secrets. Client secrets will have to
-                        be in this a file that is this string concatenated
-                        with client_secret.json. OR if this is the name of a
-                        text file then every line in the text file is
-                        processed as one user and all results appended
-                        together into a file file
+Download search analytics data (queries, pages, countries, devices, etc.) from Google Search Console.
 
-~~~~
-## GACombined2.py
+### Usage
 
-This script download from Google Analytics but ***ONLY*** views which are marked as starred/fav
+```bash
+uv run python NewDownloads.py <start_date> <end_date> [options]
+```
 
-~~~~
-usage: GACombined2.py [-h] [-f FILTERS] [-d DIMENSIONS] [-m METRICS] [-n NAME] [-t [TEST]] [-g GOOGLEACCOUNT]
-                      start_date end_date
+**Arguments:**
+- `start_date` and `end_date`: Format `yyyy-mm-dd`, or use `yesterday`, `today`, `7DaysAgo`, etc.
 
-positional arguments:
-  start_date            start date in format yyyy-mm-dd or 'yesterday' '7DaysAgo'
-  end_date              start date in format yyyy-mm-dd or 'today'
+**Options:**
+- `-t {image,video,web}`: Search type (default: web)
+- `-d DIMENSIONS`: Dimensions (e.g. `page`, `query`, `country`, `device`, or `page,query`)
+- `-n NAME`: Output file name (default: search-console-YYYY-MM-DD)
+- `-g GOOGLEACCOUNT`: Account token (see authentication below)
 
-optional arguments:
-  -h, --help            show this help message and exit
-  -f FILTERS, --filters FILTERS
-                        Filter, default is 'ga:pageviews>2'
-  -d DIMENSIONS, --dimensions DIMENSIONS
-                        The dimensions are the left hand side of the table, default is pagePath. YOU HAVE TO
-                        ADD 'ga:' before your dimension
-  -m METRICS, --metrics METRICS
-                        The metrics are the things on the left, default is pageviews. YOU HAVE TO ADD 'ga:'
-                        before your metric
-  -n NAME, --name NAME  File name for final output, default is analytics- + the current date. You do NOT need
-                        to add file extension.
-  -t [TEST], --test [TEST]
-                        Test option which makes the script output only n results, default is 3.
-  -g GOOGLEACCOUNT, --googleaccount GOOGLEACCOUNT
-                        Name of a google account; does not have to literally be the account name but becomes
-                        a token to access that particular set of secrets. Client secrets will have to be in
-                        this a file that is this string concatenated with client_secret.json. OR if this is
-                        the name of a text file then every line in the text file is processed as one user and
-                        all results appended together into a file file
+**Example:**
+```bash
+uv run python NewDownloads.py 2025-07-01 2025-07-17 -d "page,query" -n mysearchreport -g myaccount
+```
 
-~~~~
+## 2. Google Analytics 4: `GA4query3.py`
 
-## GA4query2.py
+Download page-level metrics (page views, AdSense revenue, etc.) from all your GA4 properties, or just one, or list all properties.
 
-This script fetches data from Google Analytics 4 (GA4) API for one or more properties and outputs the combined data to both CSV and Excel files.
+### Usage
 
-~~~~
-usage: GA4query2.py [-h] [-p PROPERTY_ID] [-c CREDENTIALS] [-f FILTER]
-                    [-d DIMENSIONS] [-m METRICS] [-n NAME] [-t TEST]
-                    start_date end_date
+```bash
+uv run python GA4query3.py <start_date> <end_date> -a <account_token> [options]
+```
 
-positional arguments:
-  start_date            Start date (yyyy-mm-dd)
-  end_date              End date (yyyy-mm-dd)
+**Arguments:**
+- `start_date` and `end_date`: Format `yyyy-mm-dd`
+- `-a <account_token>`: Your account token (see authentication below)
 
-optional arguments:
-  -h, --help            show this help message and exit
-  -p PROPERTY_ID, --property_id PROPERTY_ID
-                        Google Analytics 4 property ID or path to CSV file
-                        with property IDs and names.
-  -c CREDENTIALS, --credentials CREDENTIALS
-                        Path to Google Cloud credentials JSON file
-  -f FILTER, --filter FILTER
-                        Filter expression (e.g., 'pagePath=your_page_path')
-  -d DIMENSIONS, --dimensions DIMENSIONS
-                        Dimension (e.g., 'pagePath')
-  -m METRICS, --metrics METRICS
-                        Comma-separated list of metrics (e.g.,
-                        'screenPageViews,totalAdRevenue')
-  -n NAME, --name NAME  Base output file name (without extension)
-  -t TEST, --test TEST  Limit results to n rows (for testing)
-~~~~
+**Options:**
+- `-d DIMENSIONS`: Comma-separated dimensions (default: `pagePath`)
+- `-m METRICS`: Comma-separated metrics (default: `screenPageViews`)
+- `-p PROPERTY_ID`: Run for a single property only
+- `-t N`: Limit results to N rows per property (for testing)
+- `--list_properties`: List all available GA4 properties
+
+### Examples
+
+**List all GA4 properties:**
+```bash
+uv run python GA4query3.py --list_properties -a myaccount
+```
+
+**Report for ALL properties (page views & AdSense revenue):**
+```bash
+uv run python GA4query3.py 2025-07-01 2025-07-17 -a myaccount -d "pagePath" -m "screenPageViews,totalAdRevenue"
+```
+
+**Report for ONE property:**
+```bash
+uv run python GA4query3.py 2025-07-01 2025-07-17 -a myaccount -p 314029096 -d "pagePath" -m "screenPageViews,totalAdRevenue"
+```
+
+**Limit results for testing:**
+```bash
+uv run python GA4query3.py 2025-07-01 2025-07-17 -a myaccount -d "pagePath" -m "screenPageViews,totalAdRevenue" -t 5
+```
+
+**Output:**
+- Results are saved as both `.xlsx` and `.csv` files in the current directory.
+
+## Authentication Setup
 
 
-#pip commands
-copy and paste these into the terminal
+### How to Set Up Authentication
 
-~~~~
-pip install -r requirements.txt
-~~~~
+Both tools use OAuth2 authentication. You need a Google Cloud OAuth client secrets file to get started:
 
-You need a Oauth2 account and put client_secret.json in same folder as script
-https://developers.google.com/webmaster-tools/search-console-api-original/v3/quickstart/quickstart-python
+1. Go to [Google Cloud Console](https://console.developers.google.com/apis/credentials)
+2. Create a new project (if you don't have one)
+3. Enable the required APIs:
+   - Google Analytics API
+   - Google Search Console API
+4. Create credentials:
+   - Click "Create Credentials" > "OAuth client ID"
+   - Choose "Desktop app"
+   - Download the credentials file
+5. Rename the downloaded file to one of the following (depending on your usage):
+   - `google-cloud-credentials.json` (for single account usage)
+   - `<token>-client_secret.json` (for multiple accounts; `<token>` is any string you use as your account identifier)
+6. Place the credentials file in this project folder.
 
-If you are using multiple google accounts then for every google account "email@example.com" create a secrets file called email@example.com-client_secret.json
+**What happens next?**
+- On first run, you'll be prompted to authenticate in your browser.
+- A token file will be created (e.g. `myaccount-token.json`) and reused for future runs.
 
-For detailed instructions see the file: google-client-secrets-instructions.md
+**Credential files used:**
+- `google-cloud-credentials.json` or `<token>-client_secret.json`: Your OAuth client secrets
+- `<token>-token.json`: Your saved authentication token (created automatically after first login)
 
-## list_ga4_properties.py
-Lists details about a GA4 property, including its ID, name, and domain.
+**Tip:** If you use multiple Google accounts, create a separate credentials file for each and use the `-a` or `-g` option to specify which account to use.
 
-~~~~
-usage: list_ga4_properties.py [-h] -c CREDENTIALS -p PROPERTY_ID [--format {table,json,csv}] [--output OUTPUT]
+See `google-client-secrets-instructions.md` for more details and troubleshooting.
 
-List details about a GA4 property with its ID, name, and domain.
+## Dependency Management
 
-required arguments:
-  -c CREDENTIALS, --credentials CREDENTIALS
-                        Path to Google Cloud credentials JSON file
-  -p PROPERTY_ID, --property_id PROPERTY_ID
-                        Google Analytics 4 property ID
+This repo uses [uv](https://github.com/astral-sh/uv) for fast Python dependency management.
 
-optional arguments:
-  -h, --help            show this help message and exit
-  --format {table,json,csv}
-                        Output format (default: table)
-  --output OUTPUT       Output file path. If not provided, prints to stdout
+**Install dependencies:**
+```bash
+uv pip install -r requirements.txt
+```
 
-Examples:
-  # List property details in table format (default)
-  python list_ga4_properties.py -c path/to/credentials.json -p 313646501
+Or use uv's automatic install with `uv run`.
 
-  # List property details in JSON format
-  python list_ga4_properties.py -c path/to/credentials.json -p 313646501 --format json
+## Legacy & Special Tools
 
-  # Save output to a file
-  python list_ga4_properties.py -c path/to/credentials.json -p 313646501 --output properties.txt
-
-Note: Uses the same Google Cloud credentials JSON file format as GA4query2.py
-~~~~
+Other scripts in this repo are legacy or for special use cases. For most users, use only `NewDownloads.py` and `GA4query3.py`.
