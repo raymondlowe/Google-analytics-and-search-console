@@ -49,23 +49,27 @@ def fetch_search_console_data(
     scope = ['https://www.googleapis.com/auth/webmasters.readonly']
     
     # Handle multiple google accounts if file is provided
-    try:
-        googleaccounts_list = open(google_account).read().splitlines()
-        # remove empty lines
-        googleaccounts_list = [x.strip() for x in googleaccounts_list if x.strip()]
-    except:
-        googleaccounts_list = [google_account]
-    
+    if not google_account or google_account.strip() == "":
+        # No account specified, use only 'client_secrets.json' as secrets file
+        googleaccounts_list = [""]
+    else:
+        try:
+            googleaccounts_list = open(google_account).read().splitlines()
+            # remove empty lines
+            googleaccounts_list = [x.strip() for x in googleaccounts_list if x.strip()]
+        except:
+            googleaccounts_list = [google_account]
+
     if debug:
         print(f"Processing {len(googleaccounts_list)} Google account(s)")
-    
+
     combined_df = pd.DataFrame()
-    
+
     for this_google_account in googleaccounts_list:
         if debug:
-            print("Processing: " + this_google_account)
-            
+            print("Processing: " + (this_google_account if this_google_account else "default client_secrets.json"))
         # Authenticate and construct service
+        # If this_google_account is blank, use only 'client_secrets.json' as secrets file
         service = get_service('webmasters', 'v3', scope, 'client_secrets.json', this_google_account)
         profiles = service.sites().list().execute()
         

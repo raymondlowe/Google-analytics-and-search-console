@@ -78,12 +78,14 @@ def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, 
     Fetch Google Search Console data using NewDownloads module
     """
     try:
+        # If google_account is blank, use empty string as default
+        account_to_use = google_account.strip() if google_account and google_account.strip() else ""
         df = NewDownloads.fetch_search_console_data(
             start_date=start_date,
             end_date=end_date,
             search_type=search_type,
             dimensions=dimensions,
-            google_account=google_account,
+            google_account=account_to_use,
             wait_seconds=wait_seconds,
             debug=debug
         )
@@ -115,8 +117,10 @@ def query_data(data_source, start_date, end_date, ga4_property_id, ga4_auth_id, 
             ga4_dimensions, ga4_metrics, ga4_filter, debug_mode
         )
     else:  # Google Search Console
+        # If Google Account field is blank, use empty string
+        gsc_account_to_use = gsc_account.strip() if gsc_account and gsc_account.strip() else ""
         df, message = get_gsc_data(
-            start_date, end_date, gsc_account, gsc_search_type, 
+            start_date, end_date, gsc_account_to_use, gsc_search_type, 
             gsc_dimensions, gsc_wait_seconds, debug_mode
         )
     
