@@ -16,8 +16,10 @@ from mcp.types import (
     Tool,
     TextContent,
     CallToolResult,
-    ErrorCode,
-    McpError,
+    JSONRPCError,
+    INTERNAL_ERROR,
+    INVALID_PARAMS,
+    METHOD_NOT_FOUND,
 )
 import pandas as pd
 import json
@@ -248,16 +250,16 @@ async def handle_call_tool(name: str, arguments: dict[str, Any]) -> list[TextCon
         elif name == "list_gsc_domains":
             return await handle_list_gsc_domains(arguments)
         else:
-            raise McpError(ErrorCode.METHOD_NOT_FOUND, f"Unknown tool: {name}")
+            raise JSONRPCError(METHOD_NOT_FOUND, f"Unknown tool: {name}")
     except Exception as e:
         logger.error(f"Error in tool {name}: {str(e)}")
-        raise McpError(ErrorCode.INTERNAL_ERROR, f"Tool execution failed: {str(e)}")
+        raise JSONRPCError(INTERNAL_ERROR, f"Tool execution failed: {str(e)}")
 
 async def handle_query_ga4_data(arguments: dict[str, Any]) -> list[TextContent]:
     """Handle GA4 data query"""
     auth_identifier = arguments.get("auth_identifier")
     if not auth_identifier:
-        raise McpError(ErrorCode.INVALID_PARAMS, "auth_identifier is required")
+        raise JSONRPCError(INVALID_PARAMS, "auth_identifier is required")
     
     # Use provided dates or defaults
     if "start_date" in arguments and "end_date" in arguments:
@@ -269,7 +271,7 @@ async def handle_query_ga4_data(arguments: dict[str, Any]) -> list[TextContent]:
         end_date = arguments.get("end_date", date_range["end_date"])
     
     if not validate_date_range(start_date, end_date):
-        raise McpError(ErrorCode.INVALID_PARAMS, "Invalid date range")
+        raise JSONRPCError(INVALID_PARAMS, "Invalid date range")
     
     property_id = arguments.get("property_id")
     domain_filter = arguments.get("domain_filter")
@@ -340,7 +342,7 @@ async def handle_query_ga4_data(arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="No GA4 data found for the specified criteria")]
             
     except Exception as e:
-        raise McpError(ErrorCode.INTERNAL_ERROR, f"GA4 query failed: {str(e)}")
+        raise JSONRPCError(INTERNAL_ERROR, f"GA4 query failed: {str(e)}")
 
 async def handle_query_gsc_data(arguments: dict[str, Any]) -> list[TextContent]:
     """Handle GSC data query"""
@@ -356,7 +358,7 @@ async def handle_query_gsc_data(arguments: dict[str, Any]) -> list[TextContent]:
         end_date = arguments.get("end_date", date_range["end_date"])
     
     if not validate_date_range(start_date, end_date):
-        raise McpError(ErrorCode.INVALID_PARAMS, "Invalid date range")
+        raise JSONRPCError(INVALID_PARAMS, "Invalid date range")
     
     domain = arguments.get("domain")
     dimensions = arguments.get("dimensions", "page,query,country,device")
@@ -390,13 +392,13 @@ async def handle_query_gsc_data(arguments: dict[str, Any]) -> list[TextContent]:
             return [TextContent(type="text", text="No GSC data found for the specified criteria")]
             
     except Exception as e:
-        raise McpError(ErrorCode.INTERNAL_ERROR, f"GSC query failed: {str(e)}")
+        raise JSONRPCError(INTERNAL_ERROR, f"GSC query failed: {str(e)}")
 
 async def handle_query_unified_data(arguments: dict[str, Any]) -> list[TextContent]:
     """Handle unified data query (both GA4 and GSC)"""
     auth_identifier = arguments.get("auth_identifier")
     if not auth_identifier:
-        raise McpError(ErrorCode.INVALID_PARAMS, "auth_identifier is required")
+        raise JSONRPCError(INVALID_PARAMS, "auth_identifier is required")
     
     domain = arguments.get("domain")
     data_sources = arguments.get("data_sources", ["ga4", "gsc"])
@@ -411,7 +413,7 @@ async def handle_query_unified_data(arguments: dict[str, Any]) -> list[TextConte
         end_date = arguments.get("end_date", date_range["end_date"])
     
     if not validate_date_range(start_date, end_date):
-        raise McpError(ErrorCode.INVALID_PARAMS, "Invalid date range")
+        raise JSONRPCError(INVALID_PARAMS, "Invalid date range")
     
     ga4_property_id = arguments.get("ga4_property_id")
     debug = arguments.get("debug", False)
@@ -455,7 +457,7 @@ async def handle_query_unified_data(arguments: dict[str, Any]) -> list[TextConte
             errors.append(f"GSC query failed: {str(e)}")
     
     if not results and errors:
-        raise McpError(ErrorCode.INTERNAL_ERROR, "; ".join(errors))
+        raise JSONRPCError(INTERNAL_ERROR, "; ".join(errors))
     
     if errors:
         # Partial success - include errors in the response
@@ -478,7 +480,7 @@ async def handle_list_ga4_properties(arguments: dict[str, Any]) -> list[TextCont
     """Handle listing GA4 properties"""
     auth_identifier = arguments.get("auth_identifier")
     if not auth_identifier:
-        raise McpError(ErrorCode.INVALID_PARAMS, "auth_identifier is required")
+        raise JSONRPCError(INVALID_PARAMS, "auth_identifier is required")
     
     debug = arguments.get("debug", False)
     
@@ -494,7 +496,7 @@ async def handle_list_ga4_properties(arguments: dict[str, Any]) -> list[TextCont
         else:
             return [TextContent(type="text", text="No GA4 properties found")]
     except Exception as e:
-        raise McpError(ErrorCode.INTERNAL_ERROR, f"Failed to list GA4 properties: {str(e)}")
+        raise JSONRPCError(INTERNAL_ERROR, f"Failed to list GA4 properties: {str(e)}")
 
 async def handle_list_gsc_domains(arguments: dict[str, Any]) -> list[TextContent]:
     """Handle listing GSC domains"""
@@ -513,7 +515,7 @@ async def handle_list_gsc_domains(arguments: dict[str, Any]) -> list[TextContent
         else:
             return [TextContent(type="text", text="No GSC domains found")]
     except Exception as e:
-        raise McpError(ErrorCode.INTERNAL_ERROR, f"Failed to list GSC domains: {str(e)}")
+        raise JSONRPCError(INTERNAL_ERROR, f"Failed to list GSC domains: {str(e)}")
 
 async def main():
     """Main entry point for the MCP server"""

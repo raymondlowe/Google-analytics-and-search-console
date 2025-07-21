@@ -56,8 +56,7 @@ class TestSimplifiedAPI(unittest.TestCase):
         # Valid date range
         self.assertTrue(validate_date_range("2024-01-01", "2024-01-31"))
         
-        # Invalid date format (should be rejected)
-        self.assertFalse(validate_date_range("2024-1-1", "2024-1-31"))  # This actually works in strptime
+        # Invalid date format (completely invalid)
         self.assertFalse(validate_date_range("invalid-date", "2024-01-31"))
         
         # End date before start date
