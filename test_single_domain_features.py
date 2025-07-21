@@ -156,7 +156,9 @@ class TestSingleDomainFeatures(unittest.TestCase):
                     google_account="",
                     wait_seconds=0,
                     debug=False,
-                    domain_filter="example.com"
+                    domain_filter="example.com",
+                    max_retries=3,
+                    retry_delay=5
                 )
                 
             except TypeError as e:
@@ -165,7 +167,64 @@ class TestSingleDomainFeatures(unittest.TestCase):
                 else:
                     raise
 
-    def test_cli_arguments_validation(self):
+    def test_retry_functionality(self):
+        """Test that retry functionality works correctly"""
+        import time
+        
+        mock_sites_data = {
+            'siteEntry': [
+                {
+                    'siteUrl': 'https://www.example.com/', 
+                    'permissionLevel': 'siteOwner'
+                }
+            ]
+        }
+        
+        with patch('NewDownloads.get_service') as mock_get_service:
+            mock_service = Mock()
+            mock_service.sites.return_value.list.return_value.execute.return_value = mock_sites_data
+            
+            # Mock the searchanalytics query to fail first, then succeed
+            query_mock = mock_service.searchanalytics.return_value.query.return_value
+            query_mock.execute.side_effect = [
+                Exception("Internal error encountered"),  # First call fails
+                {'rows': [{'keys': ['test'], 'clicks': 5, 'impressions': 10}]}  # Second call succeeds
+            ]
+            
+            mock_get_service.return_value = mock_service
+            
+            # Mock time.sleep to avoid actual delays in tests
+            with patch('NewDownloads.time.sleep'):
+                result = NewDownloads.fetch_search_console_data(
+                    start_date="2024-01-01",
+                    end_date="2024-01-02",
+                    max_retries=2,
+                    retry_delay=1,
+                    debug=False
+                )
+                
+                # Should successfully process after retry
+                self.assertIsInstance(result, pd.DataFrame)
+                # Verify the query was called twice (initial attempt + 1 retry)
+                self.assertEqual(query_mock.execute.call_count, 2)
+
+    def test_cli_arguments_validation_with_retry_params(self):
+        """Test that CLI argument parsing works correctly with new retry parameters"""
+        import argparse
+        
+        # Create a parser similar to NewDownloads.py 
+        parser = argparse.ArgumentParser()
+        parser.add_argument("start_date", nargs='?')
+        parser.add_argument("end_date", nargs='?')
+        parser.add_argument("-s", "--domain", type=str, default="")
+        parser.add_argument("--max-retries", type=int, default=3)
+        parser.add_argument("--retry-delay", type=int, default=5)
+        parser.add_argument("--list-domains", action="store_true")
+        
+        # Test that new retry parameters work
+        args = parser.parse_args(["2024-01-01", "2024-01-02", "--max-retries", "5", "--retry-delay", "10"])
+        self.assertEqual(args.max_retries, 5)
+    def test_cli_arguments_validation_original(self):
         """Test that CLI argument parsing works correctly"""
         import argparse
         
