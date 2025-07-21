@@ -1,0 +1,49 @@
+services:
+  ga4-gsc-web:
+    build: .
+    container_name: ga4-gsc-web-interface
+    ports:
+      - "7860:7860"
+    volumes:
+      # Mount authentication files directory
+      # Place your client_secrets.json and other auth files in ./auth/ directory
+      - ./auth:/app/auth
+      # Mount data directory for downloaded files and tokens
+      - ./data:/app/data
+      # Mount current directory for access to auth files in root
+      - ./:/app/host_files:ro
+    environment:
+      # Gradio configuration
+      - GRADIO_SERVER_NAME=0.0.0.0
+      - GRADIO_SERVER_PORT=7860
+      # Optional: Set authentication (uncomment and modify as needed)
+      # - GRADIO_AUTH=username:password
+      # Optional: Enable sharing (uncomment if needed)
+      # - GRADIO_SHARE=true
+    restart: unless-stopped
+    # Optional: Add health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7860/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Optional: Add a reverse proxy for production deployment
+  # nginx:
+  #   image: nginx:alpine
+  #   container_name: ga4-gsc-nginx
+  #   ports:
+  #     - "80:80"
+  #     - "443:443"
+  #   volumes:
+  #     - ./nginx.conf:/etc/nginx/nginx.conf:ro
+  #     - ./ssl:/etc/nginx/ssl:ro
+  #   depends_on:
+  #     - ga4-gsc-web
+  #   restart: unless-stopped
+
+volumes:
+  # Named volumes for persistent data
+  auth_data:
+  app_data:

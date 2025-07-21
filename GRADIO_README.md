@@ -48,6 +48,119 @@ To create a public shareable link:
 python ga4_gsc_web_interface.py --share
 ```
 
+## Docker Deployment
+
+The application can be easily containerized and deployed using Docker.
+
+### Prerequisites
+
+- Docker and Docker Compose installed
+- Google OAuth2 credentials (see authentication setup above)
+
+### Quick Docker Setup
+
+1. **Prepare Authentication Files**
+   ```bash
+   # Create auth directory for your credentials
+   mkdir auth
+   
+   # Copy your OAuth2 credentials
+   cp client_secrets.json auth/
+   # OR if you have a different name:
+   cp google-cloud-credentials.json auth/client_secrets.json
+   ```
+
+2. **Build and Run with Docker Compose**
+   ```bash
+   # Build and start the container
+   docker compose up --build
+   
+   # Or run in detached mode
+   docker compose up -d --build
+   ```
+
+3. **Access the Application**
+   
+   The web interface will be available at: http://localhost:7860
+
+### Docker Configuration Options
+
+#### Environment Variables
+
+You can configure the application using environment variables in `docker-compose.yaml`:
+
+```yaml
+environment:
+  - GRADIO_SERVER_NAME=0.0.0.0
+  - GRADIO_SERVER_PORT=7860
+  - GRADIO_AUTH=username:password  # Optional authentication
+  - GRADIO_SHARE=true              # Optional public sharing
+```
+
+#### Volume Mounts
+
+The container uses several volume mounts:
+
+- `./auth:/app/auth` - Authentication files directory
+- `./data:/app/data` - Downloaded data and token storage
+- `./:/app/host_files:ro` - Read-only access to host files
+
+#### Custom Port
+
+To run on a different port:
+
+```bash
+# Edit docker-compose.yaml ports section or use override
+echo 'services:
+  ga4-gsc-web:
+    ports:
+      - "8080:7860"' > docker-compose.override.yaml
+
+docker compose up
+```
+
+### Manual Docker Commands
+
+If you prefer not to use Docker Compose:
+
+```bash
+# Build the image
+docker build -t ga4-gsc-web-interface .
+
+# Run the container
+docker run -d \
+  --name ga4-gsc-web \
+  -p 7860:7860 \
+  -v $(pwd)/auth:/app/auth \
+  -v $(pwd)/data:/app/data \
+  ga4-gsc-web-interface
+```
+
+### Docker Troubleshooting
+
+1. **Authentication Issues**
+   - Ensure `client_secrets.json` is in the `./auth/` directory
+   - Check file permissions: `chmod 644 auth/client_secrets.json`
+
+2. **Port Conflicts**
+   - Change the host port in docker-compose.yaml: `"8080:7860"`
+
+3. **Container Logs**
+   ```bash
+   # View logs
+   docker compose logs ga4-gsc-web
+   
+   # Follow logs in real-time
+   docker compose logs -f ga4-gsc-web
+   ```
+
+4. **Rebuild After Changes**
+   ```bash
+   # Rebuild container after code changes
+   docker compose down
+   docker compose up --build
+   ```
+
 To run on a specific host/port:
 
 ```bash
