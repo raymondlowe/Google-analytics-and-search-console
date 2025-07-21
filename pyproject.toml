@@ -20,4 +20,5 @@ dependencies = [
     "tqdm>=4.67.1",
     "urllib3>=2.3.0",
     "win-unicode-console>=0.5",
+    "gradio>=5.0.0",
 ]

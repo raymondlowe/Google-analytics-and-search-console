@@ -1,0 +1,56 @@
+# Git files
+.git
+.gitignore
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.so
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Application data files (these should be mounted as volumes)
+*.dat
+*.json
+*.xlsx
+*.csv
+*.pickle
+
+# Build artifacts
+dist/
+build/
+*.egg-info/
+
+# Documentation
+*.md
+!README.md
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+
+# Logs
+*.log
+
+# Docker files (not needed in image)
+Dockerfile*
+docker-compose*.yaml
+docker-compose*.yml
+.dockerignore

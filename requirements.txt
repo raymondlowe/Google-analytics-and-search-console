@@ -12,3 +12,5 @@ protobuf
 tabulate
 urllib3
 tqdm
+gradio>=5.0.0
+win-unicode-console>=0.5
