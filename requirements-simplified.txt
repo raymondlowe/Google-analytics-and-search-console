@@ -1,0 +1,13 @@
+# Additional requirements for the simplified API and MCP server
+# Add these to the existing requirements.txt or install separately
+
+# For the simplified REST API
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# For the MCP server
+mcp>=1.0.0
+
+# For testing (optional)
+httpx>=0.25.0  # For TestClient
+pytest>=7.0.0  # Alternative test runner
