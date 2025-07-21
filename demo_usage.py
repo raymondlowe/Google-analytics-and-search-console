@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 import GA4query3
-import search_console_api
+import NewDownloads
 
 def demo_ga4_functions():
     """
@@ -98,7 +98,7 @@ def demo_search_console_functions():
         end_date = datetime.now().strftime('%Y-%m-%d')
         start_date = (datetime.now() - timedelta(days=30)).strftime('%Y-%m-%d')
         
-        data_df = search_console_api.fetch_search_console_data(
+        data_df = NewDownloads.fetch_search_console_data(
             start_date=start_date,
             end_date=end_date,
             search_type="web",
@@ -118,7 +118,7 @@ def demo_search_console_functions():
             print(f"\nData saved to: {filename}")
             
             # Also demonstrate the save function
-            search_console_api.save_search_console_data(
+            NewDownloads.save_search_console_data(
                 data_df=data_df,
                 start_date=start_date,
                 end_date=end_date,

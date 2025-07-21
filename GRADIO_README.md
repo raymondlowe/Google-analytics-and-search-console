@@ -35,7 +35,7 @@ For detailed instructions, see: `google-client-secrets-instructions.md`
 ### 3. Run the Web Interface
 
 ```bash
-python gradio_app.py
+python ga4_gsc_web_interface.py
 ```
 
 The interface will be available at: http://127.0.0.1:7860
@@ -45,13 +45,13 @@ The interface will be available at: http://127.0.0.1:7860
 To create a public shareable link:
 
 ```bash
-python gradio_app.py --share
+python ga4_gsc_web_interface.py --share
 ```
 
 To run on a specific host/port:
 
 ```bash
-python gradio_app.py --host 0.0.0.0 --port 8080
+python ga4_gsc_web_interface.py --host 0.0.0.0 --port 8080
 ```
 
 ## Usage Guide
@@ -146,7 +146,7 @@ To use as an MCP server, the Gradio application can be configured to run as a se
 ### Command Line Arguments
 
 ```bash
-python gradio_app.py [OPTIONS]
+python ga4_gsc_web_interface.py [OPTIONS]
 
 Options:
   --host TEXT          Host to bind to (default: 127.0.0.1)
@@ -161,15 +161,14 @@ Options:
 Add basic authentication to the interface:
 
 ```bash
-python gradio_app.py --auth username:password
+python ga4_gsc_web_interface.py --auth username:password
 ```
 
 ## File Structure
 
-- `gradio_app.py` - Main Gradio web application
-- `search_console_api.py` - Refactored Search Console API functions
+- `ga4_gsc_web_interface.py` - Main Gradio web application
+- `NewDownloads.py` - Search Console API functions (refactored to be importable)
 - `GA4query3.py` - Google Analytics 4 API functions (unchanged)
-- `NewDownloads.py` - Original Search Console script (still functional)
 - `googleAPIget_service.py` - OAuth service helper
 
 ## API Endpoints

@@ -10,7 +10,7 @@ import tempfile
 
 # Import our API modules
 import GA4query3
-import search_console_api
+import NewDownloads
 
 
 def get_ga4_data(start_date, end_date, property_id, auth_identifier, dimensions, metrics, filter_expr, debug):
@@ -75,10 +75,10 @@ def get_ga4_data(start_date, end_date, property_id, auth_identifier, dimensions,
 
 def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, wait_seconds, debug):
     """
-    Fetch Google Search Console data using search_console_api module
+    Fetch Google Search Console data using NewDownloads module
     """
     try:
-        df = search_console_api.fetch_search_console_data(
+        df = NewDownloads.fetch_search_console_data(
             start_date=start_date,
             end_date=end_date,
             search_type=search_type,
