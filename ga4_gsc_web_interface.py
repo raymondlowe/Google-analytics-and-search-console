@@ -73,7 +73,7 @@ def get_ga4_data(start_date, end_date, property_id, auth_identifier, dimensions,
         return None, f"Error fetching GA4 data: {str(e)}"
 
 
-def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, wait_seconds, debug):
+def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, wait_seconds, debug, domain_filter=None):
     """
     Fetch Google Search Console data using NewDownloads module
     """
@@ -87,7 +87,8 @@ def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, 
             dimensions=dimensions,
             google_account=account_to_use,
             wait_seconds=wait_seconds,
-            debug=debug
+            debug=debug,
+            domain_filter=domain_filter
         )
         
         if df is not None and not df.empty:
@@ -101,7 +102,7 @@ def get_gsc_data(start_date, end_date, google_account, search_type, dimensions, 
 
 def query_data(data_source, start_date, end_date, ga4_property_id, ga4_auth_id, ga4_dimensions, 
                ga4_metrics, ga4_filter, gsc_account, gsc_search_type, gsc_dimensions, 
-               gsc_wait_seconds, debug_mode):
+               gsc_wait_seconds, gsc_domain_filter, debug_mode):
     """
     Main function to query data based on selected source
     """
@@ -119,9 +120,10 @@ def query_data(data_source, start_date, end_date, ga4_property_id, ga4_auth_id, 
     else:  # Google Search Console
         # If Google Account field is blank, use empty string
         gsc_account_to_use = gsc_account.strip() if gsc_account and gsc_account.strip() else ""
+        gsc_domain_to_use = gsc_domain_filter.strip() if gsc_domain_filter and gsc_domain_filter.strip() else None
         df, message = get_gsc_data(
             start_date, end_date, gsc_account_to_use, gsc_search_type, 
-            gsc_dimensions, gsc_wait_seconds, debug_mode
+            gsc_dimensions, gsc_wait_seconds, debug_mode, gsc_domain_to_use
         )
     
     return df, message
@@ -143,6 +145,23 @@ def download_csv(df):
     df.to_csv(temp_path, index=False)
     
     return temp_path
+
+
+def list_gsc_domains(google_account):
+    """
+    List available Google Search Console domains for the authenticated user
+    """
+    if not google_account:
+        google_account = ""  # Use default if empty
+    
+    try:
+        sites_df = NewDownloads.list_search_console_sites(google_account=google_account.strip(), debug=False)
+        if sites_df is not None and not sites_df.empty:
+            return sites_df, f"Found {len(sites_df)} GSC sites"
+        else:
+            return None, "No sites found or authentication failed"
+    except Exception as e:
+        return None, f"Error listing GSC domains: {str(e)}"
 
 
 def list_ga4_properties(auth_identifier):
@@ -229,6 +248,11 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
                     placeholder="Account identifier for secrets/tokens",
                     info="Used for client secrets file naming"
                 )
+                gsc_domain_filter = gr.Textbox(
+                    label="Domain Filter (optional)",
+                    placeholder="e.g., example.com (leave empty for all domains)",
+                    info="Specify a single domain to download data for, or leave empty for all accessible domains"
+                )
                 gsc_search_type = gr.Radio(
                     choices=["web", "image", "video"],
                     value="web",
@@ -245,6 +269,8 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
                     minimum=0,
                     info="Delay between API calls to prevent quota issues"
                 )
+                
+                list_gsc_domains_btn = gr.Button("List Available GSC Domains")
             
             # Query button
             query_btn = gr.Button("Fetch Data", variant="primary", size="lg")
@@ -269,6 +295,13 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
                 visible=False,
                 interactive=False
             )
+            
+            # Domains list for GSC
+            gsc_domains_table = gr.Dataframe(
+                label="Available GSC Domains",
+                visible=False,
+                interactive=False
+            )
     
     # Event handlers
     def toggle_fields(source):
@@ -289,12 +322,14 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
                 message,
                 df,
                 gr.update(value=csv_file, visible=True),
-                gr.update(visible=False)  # Hide properties table
+                gr.update(visible=False),  # Hide GA4 properties table
+                gr.update(visible=False)   # Hide GSC domains table
             )
         else:
             return (
                 message,
                 None,
+                gr.update(visible=False),
                 gr.update(visible=False),
                 gr.update(visible=False)
             )
@@ -303,9 +338,17 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
         """Show available GA4 properties"""
         df, message = list_ga4_properties(auth_id)
         if df is not None:
-            return message, gr.update(value=df, visible=True)
+            return message, gr.update(value=df, visible=True), gr.update(visible=False)
         else:
-            return message, gr.update(visible=False)
+            return message, gr.update(visible=False), gr.update(visible=False)
+    
+    def show_gsc_domains(gsc_account):
+        """Show available GSC domains"""
+        df, message = list_gsc_domains(gsc_account)
+        if df is not None:
+            return message, gr.update(visible=False), gr.update(value=df, visible=True)
+        else:
+            return message, gr.update(visible=False), gr.update(visible=False)
     
     # Wire up the event handlers
     data_source.change(
@@ -319,15 +362,21 @@ with gr.Blocks(title="Google Analytics & Search Console Data Fetcher", theme=gr.
         inputs=[
             data_source, start_date, end_date, ga4_property_id, ga4_auth_id, 
             ga4_dimensions, ga4_metrics, ga4_filter, gsc_account, gsc_search_type, 
-            gsc_dimensions, gsc_wait_seconds, debug_mode
+            gsc_dimensions, gsc_wait_seconds, gsc_domain_filter, debug_mode
         ],
-        outputs=[status_text, data_table, download_btn, properties_table]
+        outputs=[status_text, data_table, download_btn, properties_table, gsc_domains_table]
     )
     
     list_properties_btn.click(
         fn=show_properties,
         inputs=[ga4_auth_id],
-        outputs=[status_text, properties_table]
+        outputs=[status_text, properties_table, gsc_domains_table]
+    )
+    
+    list_gsc_domains_btn.click(
+        fn=show_gsc_domains,
+        inputs=[gsc_account],
+        outputs=[status_text, properties_table, gsc_domains_table]
     )
 
 
@@ -355,7 +404,8 @@ def api_query_data(source, start_date, end_date, **kwargs):
             search_type=kwargs.get('search_type', 'web'),
             dimensions=kwargs.get('dimensions', 'page'),
             wait_seconds=kwargs.get('wait_seconds', 0),
-            debug=kwargs.get('debug', False)
+            debug=kwargs.get('debug', False),
+            domain_filter=kwargs.get('domain_filter')
         )
     
     if df is not None:
@@ -371,6 +421,25 @@ def api_query_data(source, start_date, end_date, **kwargs):
             "message": message,
             "data": [],
             "row_count": 0
+        }
+
+
+def api_list_gsc_domains(google_account):
+    """
+    REST API endpoint for listing GSC domains
+    """
+    df, message = list_gsc_domains(google_account)
+    if df is not None:
+        return {
+            "status": "success",
+            "message": message,
+            "domains": df.to_dict('records')
+        }
+    else:
+        return {
+            "status": "error",
+            "message": message,
+            "domains": []
         }
 
 

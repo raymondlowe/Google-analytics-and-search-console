@@ -17,6 +17,80 @@ except ImportError:
     pass
 
 
+def list_search_console_sites(google_account="", debug=False):
+    """
+    List all available Google Search Console sites/domains for the authenticated account.
+    
+    Args:
+        google_account (str): Google account identifier for secrets/tokens
+        debug (bool): Enable debug output
+        
+    Returns:
+        pandas.DataFrame: DataFrame with site URLs and domains, or None if error
+    """
+    scope = ['https://www.googleapis.com/auth/webmasters.readonly']
+    
+    # Handle multiple google accounts if file is provided
+    if not google_account or google_account.strip() == "":
+        # No account specified, use only 'client_secrets.json' as secrets file
+        googleaccounts_list = [""]
+    else:
+        try:
+            googleaccounts_list = open(google_account).read().splitlines()
+            # remove empty lines
+            googleaccounts_list = [x.strip() for x in googleaccounts_list if x.strip()]
+        except:
+            googleaccounts_list = [google_account]
+
+    if debug:
+        print(f"Listing sites for {len(googleaccounts_list)} Google account(s)")
+
+    all_sites = []
+
+    for this_google_account in googleaccounts_list:
+        if debug:
+            print("Processing: " + (this_google_account if this_google_account else "default client_secrets.json"))
+        
+        try:
+            # Authenticate and construct service
+            service = get_service('webmasters', 'v3', scope, 'client_secrets.json', this_google_account)
+            profiles = service.sites().list().execute()
+            
+            if 'siteEntry' not in profiles:
+                if debug:
+                    print("No siteEntry found for this profile")
+                continue
+            
+            if debug:
+                print(f"Found {len(profiles['siteEntry'])} site entries")
+            
+            for item in profiles['siteEntry']:
+                if item['permissionLevel'] != 'siteUnverifiedUser':
+                    # Parse the hostname
+                    root_domain = urlparse(item['siteUrl']).hostname
+                    
+                    site_info = {
+                        'siteUrl': item['siteUrl'],
+                        'domain': root_domain if root_domain else 'Domain Property',
+                        'permissionLevel': item['permissionLevel'],
+                        'account': this_google_account if this_google_account else 'default'
+                    }
+                    all_sites.append(site_info)
+                    
+        except Exception as e:
+            if debug:
+                print(f"Error processing account {this_google_account}: {str(e)}")
+            continue
+    
+    if all_sites:
+        sites_df = pd.DataFrame(all_sites)
+        return sites_df
+    else:
+        if debug:
+            print("No accessible sites found")
+        return None
+
+
 def fetch_search_console_data(
     start_date,
     end_date,
@@ -24,7 +98,8 @@ def fetch_search_console_data(
     dimensions="page",
     google_account="",
     wait_seconds=0,
-    debug=False
+    debug=False,
+    domain_filter=None
 ):
     """
     Fetch data from Google Search Console API.
@@ -37,6 +112,7 @@ def fetch_search_console_data(
         google_account (str): Google account identifier for secrets/tokens
         wait_seconds (int): Wait seconds between API calls to prevent quota problems
         debug (bool): Enable debug output
+        domain_filter (str): Optional domain to filter results (e.g., 'example.com')
         
     Returns:
         pandas.DataFrame: Combined search console data from all accessible properties
@@ -96,7 +172,27 @@ def fetch_search_console_data(
                     if debug:
                         print(f"Skipping domain property: {item['siteUrl']}")
                     continue
+                
+                # Apply domain filter if specified
+                if domain_filter:
+                    # Normalize the domain filter and root domain for comparison
+                    filter_domain = domain_filter.lower().strip()
+                    if filter_domain.startswith('www.'):
+                        filter_domain = filter_domain[4:]
                     
+                    current_domain = root_domain.lower()
+                    if current_domain.startswith('www.'):
+                        current_domain = current_domain[4:]
+                    
+                    # Skip if this domain doesn't match the filter
+                    if current_domain != filter_domain:
+                        if debug:
+                            print(f"Skipping {item['siteUrl']} (doesn't match filter: {domain_filter})")
+                        continue
+                    
+                    if debug:
+                        print(f"Processing {item['siteUrl']} (matches filter: {domain_filter})")
+                        
                 small_df = pd.DataFrame()
                 if wait_seconds > 0:
                     if debug:
@@ -197,8 +293,8 @@ if __name__ == "__main__":
     #when doing argument parsing in command terminal put python before file name. No idea why, so just do it.
 
     #parser.add_argument("viewProfileID",type=int, help="GA View (profile) ID as a number") !!!already got this from loop!!!
-    parser.add_argument("start_date", help="start date in format yyyy-mm-dd or 'yesterday' '7DaysAgo'")
-    parser.add_argument("end_date", help="start date in format yyyy-mm-dd or 'today'")
+    parser.add_argument("start_date", nargs='?', help="start date in format yyyy-mm-dd or 'yesterday' '7DaysAgo'")
+    parser.add_argument("end_date", nargs='?', help="start date in format yyyy-mm-dd or 'today'")
     parser.add_argument("-t", "--type", default="web", choices=("image","video","web"), help="Search types for the returned data, default is web")
     #parser.add_argument("-f","--filters",default=2,type=int, help="Minimum number for metric, default is 2")
     parser.add_argument("-d","--dimensions",default="page", help="The dimensions are the left hand side of the table, default is page. Options are date, query, page, country, device.  Combine two by specifying -d page,query ")
@@ -207,8 +303,26 @@ if __name__ == "__main__":
     #parser.add_argument("-c", "--clean", action="count", default=0, help="clean output skips header and count and just sends csv rows")
     parser.add_argument("-g","--googleaccount",type=str, default="", help="Name of a google account; does not have to literally be the account name but becomes a token to access that particular set of secrets. Client secrets will have to be in this a file that is this string concatenated with client_secret.json.  OR if this is the name of a text file then every line in the text file is processed as one user and all results appended together into a file file")
     parser.add_argument("-w","--wait",type=int, default=0, help="Wait in seconds between API calls to prevent quota problems; default 0 seconds")
+    parser.add_argument("-s","--domain",type=str, default="", help="Filter results to a specific domain (e.g., 'example.com'). If not specified, data from all accessible domains will be downloaded.")
+    parser.add_argument("--list-domains", action="store_true", help="List all available Search Console domains/sites and exit")
 
     args = parser.parse_args()
+
+    # Handle list domains command
+    if args.list_domains:
+        print("Listing available Google Search Console domains...")
+        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True)
+        if sites_df is not None and len(sites_df) > 0:
+            print("\nAvailable domains:")
+            print(sites_df.to_string(index=False))
+            print(f"\nTotal: {len(sites_df)} accessible sites")
+        else:
+            print("No accessible sites found or authentication failed.")
+        exit(0)
+    
+    # Check required arguments when not listing domains
+    if not args.start_date or not args.end_date:
+        parser.error("start_date and end_date are required unless using --list-domains")
 
     start_date = args.start_date
     end_date = args.end_date
@@ -218,6 +332,7 @@ if __name__ == "__main__":
     name = args.name
     dataType = args.type
     googleaccountstring = args.googleaccount
+    domain_filter = args.domain.strip() if args.domain else None
 
     # Fetch the data using the new function
     combined_df = fetch_search_console_data(
@@ -227,7 +342,8 @@ if __name__ == "__main__":
         dimensions=dimensionsstring,
         google_account=googleaccountstring,
         wait_seconds=wait_seconds,
-        debug=True
+        debug=True,
+        domain_filter=domain_filter
     )
     
     # Save the data if we got any
