@@ -9,8 +9,7 @@ import logging
 import json
 import pandas as pd
 from mcp.server.fastmcp import FastMCP
-from datetime import datetime, timedelta
-from typing import Optional
+from datetime import datetime
 
 # Import our existing modules
 import GA4query3
@@ -34,24 +33,15 @@ def validate_date_range(start_date: str, end_date: str) -> bool:
 
 def get_default_date_range(days: int = 30) -> dict:
     """Get default date range (last N days)"""
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=days)
+    end_date = pd.Timestamp.now()
+    start_date = end_date - pd.Timedelta(days=days)
     return {
         "start_date": start_date.strftime('%Y-%m-%d'),
         "end_date": end_date.strftime('%Y-%m-%d')
     }
 
 @mcp.tool()
-async def query_ga4_data(
-    auth_identifier: str,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    property_id: Optional[str] = None,
-    domain_filter: Optional[str] = None,
-    metrics: str = "screenPageViews,totalAdRevenue",
-    dimensions: str = "pagePath",
-    debug: bool = False
-) -> dict:
+async def query_ga4_data(auth_identifier: str, start_date: str = "", end_date: str = "", property_id: str = "", domain_filter: str = "", metrics: str = "screenPageViews,totalAdRevenue", dimensions: str = "pagePath", debug: bool = False) -> dict:
     """Query Google Analytics 4 data for pageviews and ad revenue"""
     # Use get_default_date_range if dates not provided
     if not auth_identifier:
@@ -114,15 +104,7 @@ async def query_ga4_data(
         return {"status": "error", "message": f"GA4 query failed: {str(e)}"}
 
 @mcp.tool()
-async def query_gsc_data(
-    auth_identifier: str = "",
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    domain: Optional[str] = None,
-    dimensions: str = "page,query,country,device",
-    search_type: str = "web",
-    debug: bool = False
-) -> dict:
+async def query_gsc_data(auth_identifier: str = "", start_date: str = "", end_date: str = "", domain: str = "", dimensions: str = "page,query,country,device", search_type: str = "web", debug: bool = False) -> dict:
     """Query Google Search Console data for clicks, impressions, position, devices, and countries"""
     if not start_date or not end_date:
         date_range = get_default_date_range()
@@ -157,15 +139,7 @@ async def query_gsc_data(
         return {"status": "error", "message": f"GSC query failed: {str(e)}"}
 
 @mcp.tool()
-async def query_unified_data(
-    auth_identifier: str,
-    domain: Optional[str] = None,
-    start_date: Optional[str] = None,
-    end_date: Optional[str] = None,
-    ga4_property_id: Optional[str] = None,
-    data_sources: list = ["ga4", "gsc"],
-    debug: bool = False
-) -> dict:
+async def query_unified_data(auth_identifier: str, domain: str = "", start_date: str = "", end_date: str = "", ga4_property_id: str = "", data_sources: list = ["ga4", "gsc"], debug: bool = False) -> dict:
     """Query both GA4 and GSC data for a domain in a single request - ideal for comprehensive analysis"""
     if not auth_identifier:
         return {"status": "error", "message": "auth_identifier is required"}
@@ -229,8 +203,20 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
 
 if __name__ == "__main__":
     import sys
-    # If --http is passed, run as HTTP server, else stdio
-    if "--http" in sys.argv:
-        mcp.run(transport="streamable-http")
+    import argparse
+    
+    parser = argparse.ArgumentParser(description="GA4 & GSC MCP Server")
+    parser.add_argument("--http", action="store_true", help="Run as HTTP server")
+    parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
+    parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
+    args = parser.parse_args()
+    
+    if args.http:
+        print(f"Starting MCP HTTP server on {args.host}:{args.port}")
+        import uvicorn
+        # Create the streamable HTTP app and run it with uvicorn
+        app = mcp.streamable_http_app()
+        uvicorn.run(app, host=args.host, port=args.port)
     else:
+        print("Starting MCP stdio server")
         mcp.run()
