@@ -2,12 +2,13 @@
 """
 MCP HTTP client to test remote MCP server (simulates cloud client)
 """
+import argparse
 import asyncio
 import json
 from mcp import ClientSession
 from mcp.client.streamable_http import streamablehttp_client
 
-async def test_remote_mcp_server(server_url="http://127.0.0.1:8000/mcp"):
+async def test_remote_mcp_server(server_url):
     """Test the MCP server over HTTP (like a remote cloud client would)"""
     
     print(f"🌐 Testing Remote MCP Server at {server_url}")
@@ -87,38 +88,30 @@ async def test_remote_mcp_server(server_url="http://127.0.0.1:8000/mcp"):
     
     return True
 
-async def test_different_hosts():
-    """Test connecting to different host configurations"""
-    
-    # Test localhost (current setup)
-    print("=" * 60)
-    print("🏠 Testing localhost connection")
-    success1 = await test_remote_mcp_server("http://127.0.0.1:8000/mcp")
-    
-    # Test 0.0.0.0 binding (for remote access)
-    print("\n" + "=" * 60)
-    print("🌍 Testing 0.0.0.0 binding (remote-ready)")
-    print("   This simulates how a cloud client would connect")
-    success2 = await test_remote_mcp_server("http://127.0.0.1:8000/mcp")
-    
-    return success1 and success2
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Test remote MCP client.")
+    parser.add_argument("--ip", type=str, default="127.0.0.1", help="IP address of the MCP server.")
+    parser.add_argument("--port", type=int, default=8000, help="Port of the MCP server.")
+    return parser.parse_args()
 
 if __name__ == "__main__":
+    args = parse_args()
+    server_url = f"http://{args.ip}:{args.port}/mcp"
     print("🚀 Starting Remote MCP Server Test")
-    print("   This simulates a client connecting from another machine")
+    print(f"   Connecting to MCP server at: {server_url}")
     print("   Make sure to start the server first with:")
     print("   uv run mcp_server.py --http --host 0.0.0.0 --port 8000")
     print("")
-    
-    success = asyncio.run(test_different_hosts())
+    success = asyncio.run(test_remote_mcp_server(server_url))
     if success:
-        print("\n🎊 ALL REMOTE TESTS PASSED!")
+        print("\n🎊 REMOTE TEST PASSED!")
         print("🌐 Your MCP server is ready for remote clients!")
         print("")
         print("📋 To connect from a remote machine:")
         print("   1. Start server: uv run mcp_server.py --http --host 0.0.0.0 --port 8000")
-        print("   2. Connect from remote client to: http://YOUR_PC_IP:8000/mcp")
+        print(f"   2. Connect from remote client to: {server_url}")
         print("   3. Make sure port 8000 is open in firewall")
     else:
-        print("\n💥 REMOTE TESTS FAILED")
+        print("\n💥 REMOTE TEST FAILED")
         print("   Make sure the MCP server is running in HTTP mode")
