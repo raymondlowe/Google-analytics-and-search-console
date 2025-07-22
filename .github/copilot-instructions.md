@@ -1,0 +1,8 @@
+Always use the latest documentation for imports and packages.  
+
+Use fetch tool if you know the url of the docs.
+
+Use Tavily MCP Search and Extract to research documentation and examples when trying to make things work.
+
+For how to write an mcp server in Python see https://github.com/modelcontextprotocol/python-sdk
+

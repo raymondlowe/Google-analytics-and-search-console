@@ -159,7 +159,7 @@ async def query_ga4(request: GA4QueryRequest):
             return ApiResponse(
                 status="success",
                 message=f"Retrieved {len(df)} rows of GA4 data",
-                data=df.to_dict('records'),
+                data=[{str(k): v for k, v in row.items()} for row in df.to_dict('records')],
                 row_count=len(df),
                 source="ga4"
             )
