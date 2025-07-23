@@ -52,42 +52,59 @@ async def query_ga4_data(auth_identifier: str, start_date: str = "", end_date: s
         end_date = end_date or date_range["end_date"]
     if not validate_date_range(start_date, end_date):
         return {"status": "error", "message": "Invalid date range"}
-    filter_expr = f"hostname=={domain_filter}" if domain_filter else None
+    # Use correct filter field for GA4 API (dimensionFilter)
+    filter_expr = None
+    if domain_filter:
+        # Suggest using dimensionFilter for hostname
+        filter_expr = {"dimensionFilter": {"filter": f"hostname=={domain_filter}"}}
     try:
         if property_id:
-            df = GA4query3.produce_report(
-                start_date=start_date,
-                end_date=end_date,
-                property_id=property_id,
-                property_name="MCP_Property",
-                account=auth_identifier,
-                filter_expression=filter_expr,
-                dimensions=dimensions,
-                metrics=metrics,
-                debug=debug
-            )
-        else:
-            properties_df = GA4query3.list_properties(auth_identifier, debug=debug)
-            if properties_df is None or properties_df.empty:
-                return {"status": "error", "message": "No GA4 properties found"}
-            combined_df = pd.DataFrame()
-            for _, row in properties_df.iterrows():
-                pid = row.get("property_id") or row.get("id")
-                if not pid:
-                    continue
-                df_prop = GA4query3.produce_report(
+            try:
+                df = GA4query3.produce_report(
                     start_date=start_date,
                     end_date=end_date,
-                    property_id=pid,
-                    property_name=row.get("displayName", "Property"),
+                    property_id=property_id,
+                    property_name="MCP_Property",
                     account=auth_identifier,
                     filter_expression=filter_expr,
                     dimensions=dimensions,
                     metrics=metrics,
                     debug=debug
                 )
-                if df_prop is not None and not df_prop.empty:
-                    combined_df = pd.concat([combined_df, df_prop], ignore_index=True)
+            except Exception as e:
+                return {
+                    "status": "error",
+                    "message": f"GA4 query failed for property {property_id}: {str(e)}",
+                    "suggestion": "Check if the property ID is correct and if the filter field is supported. If you see 'Unknown field for RunReportRequest: filter', try removing or updating the filter."
+                }
+        else:
+            properties_df = GA4query3.list_properties(auth_identifier, debug=debug)
+            if properties_df is None or properties_df.empty:
+                return {"status": "error", "message": "No GA4 properties found", "suggestion": "Authenticate with a Google account that has GA4 properties."}
+            combined_df = pd.DataFrame()
+            for _, row in properties_df.iterrows():
+                pid = row.get("property_id") or row.get("id")
+                if not pid:
+                    continue
+                try:
+                    df_prop = GA4query3.produce_report(
+                        start_date=start_date,
+                        end_date=end_date,
+                        property_id=pid,
+                        property_name=row.get("displayName", "Property"),
+                        account=auth_identifier,
+                        filter_expression=filter_expr,
+                        dimensions=dimensions,
+                        metrics=metrics,
+                        debug=debug
+                    )
+                    if df_prop is not None and not df_prop.empty:
+                        combined_df = pd.concat([combined_df, df_prop], ignore_index=True)
+                except Exception as e:
+                    # Collect error for this property, but continue
+                    if "errors" not in locals():
+                        errors = []
+                    errors.append(f"Property {pid}: {str(e)}")
             df = combined_df if not combined_df.empty else None
         if df is not None and not df.empty:
             return {
@@ -96,12 +113,24 @@ async def query_ga4_data(auth_identifier: str, start_date: str = "", end_date: s
                 "date_range": {"start_date": start_date, "end_date": end_date},
                 "data": df.to_dict('records'),
                 "row_count": len(df),
-                "source": "ga4"
+                "source": "ga4",
+                "errors": locals().get("errors", [])
             }
         else:
-            return {"status": "success", "message": "No GA4 data found for the specified criteria", "data": [], "row_count": 0, "source": "ga4"}
+            return {
+                "status": "success",
+                "message": "No GA4 data found for the specified criteria",
+                "data": [],
+                "row_count": 0,
+                "source": "ga4",
+                "errors": locals().get("errors", [])
+            }
     except Exception as e:
-        return {"status": "error", "message": f"GA4 query failed: {str(e)}"}
+        return {
+            "status": "error",
+            "message": f"GA4 query failed: {str(e)}",
+            "suggestion": "Check your parameters, authentication, and try again. If the error persists, try a different date range or property."
+        }
 
 @mcp.tool()
 async def query_gsc_data(auth_identifier: str = "", start_date: str = "", end_date: str = "", domain: str = "", dimensions: str = "page,query,country,device", search_type: str = "web", debug: bool = False) -> dict:
@@ -113,16 +142,23 @@ async def query_gsc_data(auth_identifier: str = "", start_date: str = "", end_da
     if not validate_date_range(start_date, end_date):
         return {"status": "error", "message": "Invalid date range"}
     try:
-        df = NewDownloads.fetch_search_console_data(
-            start_date=start_date,
-            end_date=end_date,
-            search_type=search_type,
-            dimensions=dimensions,
-            google_account=auth_identifier,
-            wait_seconds=0,
-            debug=debug,
-            domain_filter=domain
-        )
+        try:
+            df = NewDownloads.fetch_search_console_data(
+                start_date=start_date,
+                end_date=end_date,
+                search_type=search_type,
+                dimensions=dimensions,
+                google_account=auth_identifier,
+                wait_seconds=0,
+                debug=debug,
+                domain_filter=domain
+            )
+        except Exception as e:
+            return {
+                "status": "error",
+                "message": f"GSC query failed: {str(e)}",
+                "suggestion": "Check your authentication, domain, and date range. If you see a pandas error like 'Columns must be same length as key', the data source may be malformed. Try again later or with different parameters."
+            }
         if df is not None and not df.empty:
             return {
                 "status": "success",
@@ -134,9 +170,19 @@ async def query_gsc_data(auth_identifier: str = "", start_date: str = "", end_da
                 "source": "gsc"
             }
         else:
-            return {"status": "success", "message": "No GSC data found for the specified criteria", "data": [], "row_count": 0, "source": "gsc"}
+            return {
+                "status": "success",
+                "message": "No GSC data found for the specified criteria",
+                "data": [],
+                "row_count": 0,
+                "source": "gsc"
+            }
     except Exception as e:
-        return {"status": "error", "message": f"GSC query failed: {str(e)}"}
+        return {
+            "status": "error",
+            "message": f"GSC query failed: {str(e)}",
+            "suggestion": "Check your parameters, authentication, and try again."
+        }
 
 @mcp.tool()
 async def query_unified_data(auth_identifier: str, domain: str = "", start_date: str = "", end_date: str = "", ga4_property_id: str = "", data_sources: list = ["ga4", "gsc"], debug: bool = False) -> dict:
@@ -181,9 +227,18 @@ async def list_ga4_properties(auth_identifier: str, debug: bool = False) -> dict
                 "properties": properties_df.to_dict('records')
             }
         else:
-            return {"status": "success", "message": "No GA4 properties found", "properties": []}
+            return {
+                "status": "success",
+                "message": "No GA4 properties found",
+                "properties": [],
+                "suggestion": "Authenticate with a Google account that has GA4 properties."
+            }
     except Exception as e:
-        return {"status": "error", "message": f"Failed to list GA4 properties: {str(e)}"}
+        return {
+            "status": "error",
+            "message": f"Failed to list GA4 properties: {str(e)}",
+            "suggestion": "Check your authentication and try again."
+        }
 
 @mcp.tool()
 async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> dict:
@@ -197,9 +252,18 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
                 "domains": domains_df.to_dict('records')
             }
         else:
-            return {"status": "success", "message": "No GSC domains found", "domains": []}
+            return {
+                "status": "success",
+                "message": "No GSC domains found",
+                "domains": [],
+                "suggestion": "Authenticate with a Google account that has Search Console access."
+            }
     except Exception as e:
-        return {"status": "error", "message": f"Failed to list GSC domains: {str(e)}"}
+        return {
+            "status": "error",
+            "message": f"Failed to list GSC domains: {str(e)}",
+            "suggestion": "Check your authentication and try again."
+        }
 
 if __name__ == "__main__":
     import sys
@@ -217,11 +281,11 @@ if __name__ == "__main__":
         display_host = host if host != "0.0.0.0" else "localhost"
         url = f"{scheme}://{display_host}:{port}/mcp"
         tools = [
-            "query_ga4_data",
-            "query_gsc_data",
-            "query_unified_data",
-            "list_ga4_properties",
-            "list_gsc_domains"
+            {"name": "query_ga4_data", "description": "Query Google Analytics 4 data for pageviews and ad revenue."},
+            {"name": "query_gsc_data", "description": "Query Google Search Console data for clicks, impressions, etc."},
+            {"name": "query_unified_data", "description": "Query both GA4 and GSC data for a domain in a single request."},
+            {"name": "list_ga4_properties", "description": "List all available GA4 properties for the authenticated account."},
+            {"name": "list_gsc_domains", "description": "List all available Google Search Console domains for the authenticated account."}
         ]
         print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent:\n")
         print("{")
@@ -232,7 +296,7 @@ if __name__ == "__main__":
         print('      "tools": [')
         for i, tool in enumerate(tools):
             comma = "," if i < len(tools) - 1 else ""
-            print(f'        "{tool}"{comma}')
+            print(f'        {{ "name": "{tool["name"]}", "description": "{tool["description"]}" }}{comma}')
         print('      ]')
         print('    }')
         print('  }')
