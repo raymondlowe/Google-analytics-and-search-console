@@ -70,8 +70,27 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
             print(f"Saved User authorisation Saved User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
 
     if not authorisation or not authorisation.valid:
+
         if debug:
             print("User authorisation either not loaded or invalid. Starting authorization flow...")
+        def try_run_local_server(flow, debug, ports=[8080, 8081, 8090, 8091, 8100]):
+            last_exception = None
+            for port in ports:
+                try:
+                    if debug:
+                        print(f"Attempting OAuth local server on port {port}...")
+                    flow.run_local_server(port=port)
+                    if debug:
+                        print(f"OAuth local server succeeded on port {port}.")
+                    return flow.credentials
+                except Exception as e:
+                    print(f"[ERROR] OAuth local server failed on port {port}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    last_exception = e
+            print("[FATAL] All attempted ports failed for OAuth local server. Please check for port conflicts (e.g., with 'netstat -ano | findstr :8080') and close any processes using these ports, or specify a custom port.")
+            raise last_exception
+
         if authorisation and authorisation.expired and authorisation.refresh_token:
             if debug:
                 print("User authorisation Token expired, attempting refresh...")
@@ -81,13 +100,11 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
                     print("User authorisation Token refreshed successfully.")
             except Exception as refresh_e:
                 print(f"Error refreshing User authorisation token: {refresh_e}, re-authorizing...")
-                flow.run_local_server() # Re-authorize if refresh fails
-                authorisation = flow.credentials
+                authorisation = try_run_local_server(flow, debug)
         else:
             if debug:
                 print("No valid User authorisation token found, running authorization flow...")
-            flow.run_local_server() # Run flow to get new credentials
-            authorisation = flow.credentials
+            authorisation = try_run_local_server(flow, debug)
 
         if authorisation and authorisation.valid: # Only save if creds were successfully obtained
             if debug:
@@ -198,9 +215,28 @@ def list_properties(account, debug=False):
         if debug:
             print(f"User authorisation Token file not found: {token_file}. Proceeding with authorization flow.")
 
+
     if not authorisation or not authorisation.valid:
         if debug:
             print("User authorisation either not loaded or invalid. Starting authorization flow...")
+        def try_run_local_server(flow, debug, ports=[8080, 8081, 8090, 8091, 8100]):
+            last_exception = None
+            for port in ports:
+                try:
+                    if debug:
+                        print(f"Attempting OAuth local server on port {port}...")
+                    flow.run_local_server(port=port)
+                    if debug:
+                        print(f"OAuth local server succeeded on port {port}.")
+                    return flow.credentials
+                except Exception as e:
+                    print(f"[ERROR] OAuth local server failed on port {port}: {e}")
+                    import traceback
+                    traceback.print_exc()
+                    last_exception = e
+            print("[FATAL] All attempted ports failed for OAuth local server. Please check for port conflicts (e.g., with 'netstat -ano | findstr :8080') and close any processes using these ports, or specify a custom port.")
+            raise last_exception
+
         if authorisation and authorisation.expired and authorisation.refresh_token:
             if debug:
                 print("User authorisation Token expired, attempting refresh...")
@@ -210,13 +246,11 @@ def list_properties(account, debug=False):
                     print("User authorisation Token refreshed successfully.")
             except Exception as refresh_e:
                 print(f"Error refreshing User authorisation token: {refresh_e}, re-authorizing...")
-                flow.run_local_server()
-                authorisation = flow.credentials
+                authorisation = try_run_local_server(flow, debug)
         else:
             if debug:
                 print("No valid User authorisation token found, running authorization flow...")
-            flow.run_local_server()
-            authorisation = flow.credentials
+            authorisation = try_run_local_server(flow, debug)
 
         if authorisation and authorisation.valid:
             if debug:
