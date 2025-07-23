@@ -204,15 +204,43 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
 if __name__ == "__main__":
     import sys
     import argparse
-    
+
     parser = argparse.ArgumentParser(description="GA4 & GSC MCP Server")
     parser.add_argument("--http", action="store_true", help="Run as HTTP server")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
     args = parser.parse_args()
-    
+
+    def print_github_copilot_mcp_config(host, port, scheme="http"):
+        # If host is 0.0.0.0, suggest localhost for local, or let user replace with public/tunnel hostname
+        display_host = host if host != "0.0.0.0" else "localhost"
+        url = f"{scheme}://{display_host}:{port}/mcp"
+        tools = [
+            "query_ga4_data",
+            "query_gsc_data",
+            "query_unified_data",
+            "list_ga4_properties",
+            "list_gsc_domains"
+        ]
+        print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent:\n")
+        print("{")
+        print('  "mcpServers": {')
+        print('    "ga4-gsc-mcp": {')
+        print('      "type": "http",')
+        print(f'      "url": "{url}",')
+        print('      "tools": [')
+        for i, tool in enumerate(tools):
+            comma = "," if i < len(tools) - 1 else ""
+            print(f'        "{tool}"{comma}')
+        print('      ]')
+        print('    }')
+        print('  }')
+        print('}')
+        print("➡️  Paste this block into your repository’s Copilot coding agent MCP configuration \n")
+
     if args.http:
         print(f"Starting MCP HTTP server on {args.host}:{args.port}")
+        print_github_copilot_mcp_config(args.host, args.port, scheme="http")
         import uvicorn
         # Create the streamable HTTP app and run it with uvicorn
         app = mcp.streamable_http_app()
