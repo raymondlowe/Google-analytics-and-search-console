@@ -91,13 +91,25 @@ async def test_remote_mcp_server(server_url):
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Test remote MCP client.")
-    parser.add_argument("--ip", type=str, default="127.0.0.1", help="IP address of the MCP server.")
+    parser.add_argument("--ip", type=str, default="127.0.0.1", help="IP address or hostname of the MCP server.")
     parser.add_argument("--port", type=int, default=8000, help="Port of the MCP server.")
+    parser.add_argument("--scheme", type=str, choices=["http", "https"], default=None, help="URL scheme: http or https. If not set, will use https for port 443, else http.")
+    parser.add_argument("--url", type=str, default=None, help="Full MCP server URL (overrides ip/port/scheme)")
     return parser.parse_args()
 
 if __name__ == "__main__":
     args = parse_args()
-    server_url = f"http://{args.ip}:{args.port}/mcp"
+    if args.url:
+        server_url = args.url
+    else:
+        # Determine scheme: use --scheme if set, else https for port 443, else http
+        if args.scheme:
+            scheme = args.scheme
+        elif args.port == 443:
+            scheme = "https"
+        else:
+            scheme = "http"
+        server_url = f"{scheme}://{args.ip}:{args.port}/mcp"
     print("🚀 Starting Remote MCP Server Test")
     print(f"   Connecting to MCP server at: {server_url}")
     print("   Make sure to start the server first with:")
@@ -111,7 +123,7 @@ if __name__ == "__main__":
         print("📋 To connect from a remote machine:")
         print("   1. Start server: uv run mcp_server.py --http --host 0.0.0.0 --port 8000")
         print(f"   2. Connect from remote client to: {server_url}")
-        print("   3. Make sure port 8000 is open in firewall")
+        print("   3. Make sure port 8000 is open in firewall (unless using a tunnel)")
     else:
         print("\n💥 REMOTE TEST FAILED")
         print("   Make sure the MCP server is running in HTTP mode")
