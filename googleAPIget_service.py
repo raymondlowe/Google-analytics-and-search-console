@@ -26,15 +26,28 @@ def get_service(api_name, api_version, scope, client_secrets_path, usernameToken
       parents=[tools.argparser])
   flags = parser.parse_args([])
 
+  import os
   if usernameToken == "":
     combined_client_secrets_path = client_secrets_path
   else:
     combined_client_secrets_path = usernameToken+"-"+client_secrets_path
 
+  # If the custom client secrets file does not exist, fall back to the default
+  if not os.path.exists(combined_client_secrets_path):
+    if usernameToken != "" and os.path.exists(client_secrets_path):
+      # Fallback to default client_secrets.json
+      combined_client_secrets_path = client_secrets_path
+    else:
+      raise RuntimeError(f"Could not find Google client secrets file '{combined_client_secrets_path}'. This may be due to an invalid or missing 'auth_identifier' or secrets file. Checked: '{combined_client_secrets_path}' and '{client_secrets_path}'")
+
   # Set up a Flow object to be used if we need to authenticate.
-  flow = client.flow_from_clientsecrets(
-      combined_client_secrets_path, scope=scope,
-      message=tools.message_if_missing(combined_client_secrets_path))
+  try:
+    flow = client.flow_from_clientsecrets(
+        combined_client_secrets_path, scope=scope,
+        message=tools.message_if_missing(combined_client_secrets_path))
+  except Exception as e:
+    # Provide a clear error if the client secrets file is missing or invalid
+    raise RuntimeError(f"Could not load Google client secrets file '{combined_client_secrets_path}'. This may be due to an invalid or missing 'auth_identifier' or secrets file. Details: {e}")
 
   # Prepare credentials, and authorize HTTP object with them.
   # If the credentials don't exist or are invalid run through the native client
@@ -48,11 +61,17 @@ def get_service(api_name, api_version, scope, client_secrets_path, usernameToken
 
   storage = file.Storage(combined_data_file_name)
   credentials = storage.get()
-  if credentials is None or credentials.invalid:
-    credentials = tools.run_flow(flow, storage, flags)
-  http = credentials.authorize(http=httplib2.Http())
+  try:
+    if credentials is None or credentials.invalid:
+      credentials = tools.run_flow(flow, storage, flags)
+    http = credentials.authorize(http=httplib2.Http())
+  except Exception as e:
+    raise RuntimeError(f"Google OAuth authentication failed for secrets file '{combined_client_secrets_path}'. Details: {e}")
 
   # Build the service object.
-  service = build(api_name, api_version, http=http)
+  try:
+    service = build(api_name, api_version, http=http)
+  except Exception as e:
+    raise RuntimeError(f"Failed to build Google API service for '{api_name}'. Details: {e}")
 
   return service
