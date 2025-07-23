@@ -209,6 +209,7 @@ if __name__ == "__main__":
     parser.add_argument("--http", action="store_true", help="Run as HTTP server")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to (default: 127.0.0.1)")
     parser.add_argument("--port", type=int, default=8000, help="Port to bind to (default: 8000)")
+    parser.add_argument("--debug", action="store_true", help="Enable debug output for all routines")
     args = parser.parse_args()
 
     def print_github_copilot_mcp_config(host, port, scheme="http"):
@@ -237,6 +238,26 @@ if __name__ == "__main__":
         print('  }')
         print('}')
         print("➡️  Paste this block into your repository’s Copilot coding agent MCP configuration \n")
+
+    # Patch: Set a global debug flag and patch all tool functions to pass debug if not explicitly set
+    DEBUG_FLAG = args.debug
+
+    # Patch all mcp.tool functions to inject debug if not set
+    import functools
+    for tool_name in [
+        "query_ga4_data",
+        "query_gsc_data",
+        "query_unified_data",
+        "list_ga4_properties",
+        "list_gsc_domains"
+    ]:
+        orig_func = getattr(mcp, tool_name, None)
+        if orig_func is not None:
+            async def wrapper(*a, __orig_func=orig_func, **kw):
+                if 'debug' not in kw:
+                    kw['debug'] = DEBUG_FLAG
+                return await __orig_func(*a, **kw)
+            setattr(mcp, tool_name, wrapper)
 
     if args.http:
         print(f"Starting MCP HTTP server on {args.host}:{args.port}")
