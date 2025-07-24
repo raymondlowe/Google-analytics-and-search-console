@@ -63,8 +63,7 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
-        end_date: End date in YYYY-MM-DD format (required) 
-        auth_identifier: Google account identifier (optional, defaults to primary account)
+        end_date: End date in YYYY-MM-DD format (required)
         property_id: Specific GA4 property ID (optional, queries all properties if not specified)
         domain_filter: Filter by hostname (optional)
         metrics: Comma-separated metrics (default: screenPageViews,totalAdRevenue)
@@ -152,7 +151,6 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional, defaults to primary account)
         domain: Filter by specific domain (optional, queries all domains if not specified)
         dimensions: Comma-separated dimensions (default: page,query,country,device)
         search_type: Type of search data - web, image, video (default: web)
@@ -207,7 +205,6 @@ async def query_unified_data(start_date: str, end_date: str, auth_identifier: st
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional, defaults to primary account)
         domain: Domain to analyze (optional, analyzes all domains if not specified)
         ga4_property_id: Specific GA4 property ID (optional)
         data_sources: List of data sources to query - ["ga4"], ["gsc"], or ["ga4", "gsc"] (default: both)
@@ -249,7 +246,6 @@ async def list_ga4_properties(auth_identifier: str = "", debug: bool = False) ->
     to identify the correct property_id for focused analysis.
     
     Args:
-        auth_identifier: Google account identifier (optional, defaults to primary account)
         debug: Enable debug output
     """
     try:
@@ -275,7 +271,6 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
     to identify the correct domain parameter for focused analysis.
     
     Args:
-        auth_identifier: Google account identifier (optional, defaults to primary account)  
         debug: Enable debug output
     """
     try:
@@ -312,7 +307,6 @@ async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: 
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         property_id: Specific GA4 property ID (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
@@ -345,7 +339,6 @@ async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: s
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         property_id: Specific GA4 property ID (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
@@ -378,7 +371,6 @@ async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier:
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         property_id: Specific GA4 property ID (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
@@ -411,7 +403,6 @@ async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: 
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         property_id: Specific GA4 property ID (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
@@ -446,7 +437,6 @@ async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: 
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         domain: Filter by specific domain (optional)
         debug: Enable debug output
     """
@@ -477,7 +467,6 @@ async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: st
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         domain: Filter by specific domain (optional)
         debug: Enable debug output
     """
@@ -508,7 +497,6 @@ async def page_query_opportunities_gsc(start_date: str, end_date: str, auth_iden
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        auth_identifier: Google account identifier (optional)
         domain: Filter by specific domain (optional)
         debug: Enable debug output
     """
