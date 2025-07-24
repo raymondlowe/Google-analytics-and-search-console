@@ -74,8 +74,6 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
         return {"status": "error", "message": "start_date and end_date are required parameters"}
     if not validate_date_range(start_date, end_date):
         return {"status": "error", "message": "Invalid date range"}
-    if not validate_date_range(start_date, end_date):
-        return {"status": "error", "message": "Invalid date range"}
     filter_expr = f"hostname=={domain_filter}" if domain_filter else None
     try:
         if property_id:
@@ -95,24 +93,46 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
             if properties_df is None or properties_df.empty:
                 return {"status": "error", "message": "No GA4 properties found"}
             combined_df = pd.DataFrame()
+            errors = []
             for _, row in properties_df.iterrows():
                 pid = row.get("property_id") or row.get("id")
                 if not pid:
                     continue
-                df_prop = GA4query3.produce_report(
-                    start_date=start_date,
-                    end_date=end_date,
-                    property_id=pid,
-                    property_name=row.get("displayName", "Property"),
-                    account=auth_identifier,
-                    filter_expression=filter_expr,
-                    dimensions=dimensions,
-                    metrics=metrics,
-                    debug=debug
-                )
-                if df_prop is not None and not df_prop.empty:
-                    combined_df = pd.concat([combined_df, df_prop], ignore_index=True)
+                try:
+                    df_prop = GA4query3.produce_report(
+                        start_date=start_date,
+                        end_date=end_date,
+                        property_id=pid,
+                        property_name=row.get("displayName", "Property"),
+                        account=auth_identifier,
+                        filter_expression=filter_expr,
+                        dimensions=dimensions,
+                        metrics=metrics,
+                        debug=debug
+                    )
+                    if df_prop is not None and not df_prop.empty:
+                        combined_df = pd.concat([combined_df, df_prop], ignore_index=True)
+                except Exception as prop_error:
+                    # Collect individual property errors but continue processing
+                    error_msg = f"Error for property {row.get('displayName', 'Unknown')} ({pid}): {str(prop_error)}"
+                    errors.append(error_msg)
+                    if debug:
+                        print(f"Property error: {error_msg}")
             df = combined_df if not combined_df.empty else None
+            # If we have errors but some data, include error details in response
+            if errors and df is not None and not df.empty:
+                return {
+                    "status": "partial_success",
+                    "message": f"Retrieved {len(df)} rows of GA4 data with {len(errors)} property errors",
+                    "date_range": {"start_date": start_date, "end_date": end_date},
+                    "data": df.to_dict('records'),
+                    "row_count": len(df),
+                    "source": "ga4",
+                    "errors": errors
+                }
+            elif errors and (df is None or df.empty):
+                # All properties failed, return error with all details
+                return {"status": "error", "message": f"All properties failed: {'; '.join(errors)}"}
         if df is not None and not df.empty:
             return {
                 "status": "success",
@@ -158,8 +178,6 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
     """
     if not start_date or not end_date:
         return {"status": "error", "message": "start_date and end_date are required parameters"}
-    if not validate_date_range(start_date, end_date):
-        return {"status": "error", "message": "Invalid date range"}
     if not validate_date_range(start_date, end_date):
         return {"status": "error", "message": "Invalid date range"}
     try:
@@ -212,8 +230,6 @@ async def query_unified_data(start_date: str, end_date: str, auth_identifier: st
     """
     if not start_date or not end_date:
         return {"status": "error", "message": "start_date and end_date are required parameters"}
-    if not validate_date_range(start_date, end_date):
-        return {"status": "error", "message": "Invalid date range"}
     if not validate_date_range(start_date, end_date):
         return {"status": "error", "message": "Invalid date range"}
     results = []
