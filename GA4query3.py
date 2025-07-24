@@ -139,7 +139,7 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         # Add filter if provided
         if filter_expression:
             filter_expression_list = [FilterExpression(filter = Filter(field_name = filter_expression.split('=')[0], string_filter= {'value': filter_expression.split('=')[1]}))] # corrected filter syntax
-            request.filter = filter_expression_list[0]
+            request.dimension_filter = filter_expression_list[0]
 
         if debug:
             print("Sending GA4 API request...")
@@ -164,11 +164,14 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         return df # Return the DataFrame
 
     except Exception as api_error:
-        print(f"GA4 API Error for property {property_name} ({property_id}): {api_error}")
-        return None
-    except Exception as api_error: # Catch any errors during API interaction
-        print(f"GA4 API Error for property {property_name} ({property_id}): {api_error}")
-        return None
+        # Pass through the complete error message for debugging
+        error_msg = f"GA4 API Error for property {property_name} ({property_id}): {str(api_error)}"
+        if debug:
+            print(error_msg)
+            import traceback
+            traceback.print_exc()
+        # Re-raise the exception with the full context so it can be caught by higher-level handlers
+        raise Exception(error_msg) from api_error
 
 
 def list_properties(account, debug=False):
