@@ -66,13 +66,23 @@ def list_search_console_sites(google_account="", debug=False):
             
             for item in profiles['siteEntry']:
                 if item['permissionLevel'] != 'siteUnverifiedUser':
-                    # Parse the hostname
-                    root_domain = urlparse(item['siteUrl']).hostname
+                    # Parse the hostname - handle both URL-prefix and domain properties
+                    site_url = item['siteUrl']
+                    
+                    if site_url.startswith('sc-domain:'):
+                        # GSC Domain property (e.g., "sc-domain:example.com")
+                        root_domain = site_url[10:]  # Remove "sc-domain:" prefix
+                        property_type = 'Domain Property'
+                    else:
+                        # URL-prefix property (e.g., "https://example.com/")
+                        root_domain = urlparse(site_url).hostname
+                        property_type = 'URL-prefix Property'
                     
                     site_info = {
-                        'siteUrl': item['siteUrl'],
-                        'domain': root_domain if root_domain else 'Domain Property',
+                        'siteUrl': site_url,
+                        'domain': root_domain if root_domain else 'Unknown',
                         'permissionLevel': item['permissionLevel'],
+                        'property_type': property_type,
                         'account': this_google_account if this_google_account else 'default'
                     }
                     all_sites.append(site_info)
@@ -168,13 +178,24 @@ def fetch_search_console_data(
         for item in profiles['siteEntry']:
             bar.next()
             if item['permissionLevel'] != 'siteUnverifiedUser':
-                # Parse the hostname
-                root_domain = urlparse(item['siteUrl']).hostname
+                # Parse the hostname - handle both URL-prefix and domain properties
+                site_url = item['siteUrl']
                 
-                # Skip if rootDomain is None (likely a "Domain" property)
+                if site_url.startswith('sc-domain:'):
+                    # GSC Domain property (e.g., "sc-domain:example.com")
+                    root_domain = site_url[10:]  # Remove "sc-domain:" prefix
+                    if debug:
+                        print(f"Found domain property: {site_url} -> extracted domain: {root_domain}")
+                else:
+                    # URL-prefix property (e.g., "https://example.com/")
+                    root_domain = urlparse(site_url).hostname
+                    if debug and root_domain:
+                        print(f"Found URL-prefix property: {site_url} -> extracted hostname: {root_domain}")
+                
+                # Skip if rootDomain is None (shouldn't happen now, but keep as safety check)
                 if root_domain is None:
                     if debug:
-                        print(f"Skipping domain property: {item['siteUrl']}")
+                        print(f"Skipping property with unparseable domain: {site_url}")
                     continue
                 
                 # Apply domain filter if specified
@@ -191,11 +212,11 @@ def fetch_search_console_data(
                     # Skip if this domain doesn't match the filter
                     if current_domain != filter_domain:
                         if debug:
-                            print(f"Skipping {item['siteUrl']} (doesn't match filter: {domain_filter})")
+                            print(f"Skipping {site_url} (normalized domain '{current_domain}' doesn't match filter '{filter_domain}')")
                         continue
                     
                     if debug:
-                        print(f"Processing {item['siteUrl']} (matches filter: {domain_filter})")
+                        print(f"Processing {site_url} (normalized domain '{current_domain}' matches filter '{filter_domain}')")
                         
                 small_df = pd.DataFrame()
                 if wait_seconds > 0:
@@ -238,12 +259,21 @@ def fetch_search_console_data(
                                 small_df[['key-1','key-2']] = pd.DataFrame(small_df['keys'].tolist(), index=small_df.index)
                                 small_df['keys']
                             
-                            root_domain = urlparse(item['siteUrl']).hostname
-                            if 'www.' in root_domain:
-                                root_domain = root_domain.replace('www.','')
+                            # Extract domain consistently with the filtering logic
+                            site_url = item['siteUrl']
+                            if site_url.startswith('sc-domain:'):
+                                # GSC Domain property (e.g., "sc-domain:example.com")
+                                root_domain_for_df = site_url[10:]  # Remove "sc-domain:" prefix
+                            else:
+                                # URL-prefix property (e.g., "https://example.com/")
+                                root_domain_for_df = urlparse(site_url).hostname
+                                
+                            # Normalize domain for DataFrame (remove www.)
+                            if root_domain_for_df and 'www.' in root_domain_for_df:
+                                root_domain_for_df = root_domain_for_df.replace('www.','')
                             
                             small_df.insert(0,'siteUrl',item['siteUrl'])
-                            small_df.insert(0,'rootDomain',root_domain)
+                            small_df.insert(0,'rootDomain',root_domain_for_df)
                             
                             if len(big_df.columns) == 0:
                                 big_df = small_df.copy()
