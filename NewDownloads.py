@@ -251,13 +251,33 @@ def fetch_search_console_data(
                         
                         success = True  # Mark as successful if we get here
                         
-                        if len(results) == 2:
+                        if 'rows' in results and len(results['rows']) > 0:
                             small_df = small_df._append(results['rows'])
                             
                             if multi_dimension:
-                                # solves key1 reserved word problem
-                                small_df[['key-1','key-2']] = pd.DataFrame(small_df['keys'].tolist(), index=small_df.index)
-                                small_df['keys']
+                                # Handle multi-dimensional keys dynamically based on actual dimensions
+                                try:
+                                    if len(small_df) > 0 and 'keys' in small_df.columns:
+                                        keys_list = small_df['keys'].tolist()
+                                        if keys_list:
+                                            # Determine number of dimensions from the first row
+                                            first_keys = keys_list[0] if keys_list else []
+                                            num_dimensions = len(first_keys) if isinstance(first_keys, list) else 0
+                                            
+                                            if num_dimensions > 0:
+                                                # Create column names dynamically
+                                                key_columns = [f'key-{i+1}' for i in range(num_dimensions)]
+                                                
+                                                # Convert keys to DataFrame with proper number of columns
+                                                keys_df = pd.DataFrame(keys_list, index=small_df.index, columns=key_columns)
+                                                
+                                                # Add the new columns to small_df
+                                                for col in key_columns:
+                                                    small_df[col] = keys_df[col]
+                                except Exception as keys_error:
+                                    if debug:
+                                        print(f"Warning: Could not process multi-dimensional keys for {item['siteUrl']}: {keys_error}")
+                                    # Continue processing without expanding keys
                             
                             # Extract domain consistently with the filtering logic
                             site_url = item['siteUrl']
