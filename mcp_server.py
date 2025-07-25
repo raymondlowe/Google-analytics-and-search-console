@@ -207,7 +207,7 @@ def get_default_date_range(days: int = 30) -> dict:
     }
 
 @mcp.tool()
-async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", metrics: str = "screenPageViews,totalAdRevenue", dimensions: str = "pagePath", debug: bool = False) -> dict:
+async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", metrics: str = "screenPageViews,totalAdRevenue,sessions", dimensions: str = "pagePath", debug: bool = False) -> dict:
     """
     Query Google Analytics 4 data for comprehensive website analytics.
     
@@ -220,22 +220,22 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     ⚠️ IMPORTANT: Dimension & Metric Validation
     Only use valid GA4 dimensions and metrics. Invalid ones will cause 400 errors.
     
-    📋 Common Valid Dimensions:
-    - Page/Content: pagePath, pageTitle, hostname, landingPage
+    📋 Commonly Used Valid Dimensions:
+    - Page/Content: pagePath, pageTitle, hostname, landingPage, landingPagePlusQueryString
     - User/Session: country, city, deviceCategory, browser, operatingSystem
-    - Traffic Source: sessionSource, sessionMedium, sessionCampaignId, sessionCampaignName
+    - Traffic Source: sessionSource, sessionMedium, sessionSourceMedium
     - Time: date, hour, dayOfWeek, month, year
     - Custom: Use format "customEvent:parameter_name" for event-scoped custom dimensions
     
-    📊 Common Valid Metrics:
-    - Page Views: screenPageViews, screenPageViewsPerSession, screenPageViewsPerUser
+    📊 Commonly Used Valid Metrics:
+    - Page Views: screenPageViews, screenPageViewsPerSession, scrolledUsers
     - Users: activeUsers, newUsers, totalUsers, sessions, sessionsPerUser
-    - Engagement: averageSessionDuration, bounceRate, engagementRate, engagedSessions
-    - Revenue: totalAdRevenue, totalRevenue, averageRevenuePerUser
+    - Engagement: userEngagementDuration, averageSessionDuration, bounceRate, engagementRate
+    - Revenue: totalAdRevenue, totalRevenue, publisherAdClicks, publisherAdImpressions
     - Events: eventCount, eventCountPerUser, keyEvents
     
     🚫 Common Mistakes to Avoid:
-    - ❌ sessionCampaign → ✅ sessionCampaignId or sessionCampaignName
+    - ❌ sessionCampaign → ✅ sessionCampaignId or sessionCampaignName (if needed for campaigns)
     - ❌ pageviews → ✅ screenPageViews  
     - ❌ users → ✅ activeUsers or totalUsers
     - ❌ Invalid custom dimensions without proper "customEvent:" prefix
@@ -255,7 +255,7 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
         end_date: End date in YYYY-MM-DD format (required)
         property_id: Specific GA4 property ID (optional, queries all properties if not specified)
         domain_filter: Filter by hostname (optional, only applied when querying all properties)
-        metrics: Comma-separated metrics (default: screenPageViews,totalAdRevenue)
+        metrics: Comma-separated metrics (default: screenPageViews,totalAdRevenue,sessions)
         dimensions: Comma-separated dimensions (default: pagePath)
         debug: Enable debug output
     """
@@ -705,7 +705,7 @@ async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: 
     
     # Use specific dimensions and metrics optimized for page performance analysis
     dimensions = "pagePath,deviceCategory"
-    metrics = "screenPageViews,sessions,averageSessionDuration,bounceRate,totalUsers"
+    metrics = "screenPageViews,sessions,userEngagementDuration,bounceRate,totalUsers"
     
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
@@ -736,8 +736,8 @@ async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: s
         return {"status": "error", "message": "start_date and end_date are required parameters"}
     
     # Use specific dimensions and metrics optimized for traffic source analysis
-    dimensions = "sessionSource,sessionMedium,sessionCampaignId,country"
-    metrics = "sessions,totalUsers,averageSessionDuration,bounceRate,screenPageViews"
+    dimensions = "sessionSource,sessionMedium,country"
+    metrics = "sessions,totalUsers,userEngagementDuration,bounceRate,screenPageViews"
     
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
@@ -769,7 +769,7 @@ async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier:
     
     # Use specific dimensions and metrics optimized for audience analysis
     dimensions = "country,deviceCategory,operatingSystem,browser,language"
-    metrics = "totalUsers,sessions,averageSessionDuration,screenPageViews"
+    metrics = "totalUsers,sessions,userEngagementDuration,screenPageViews"
     
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
@@ -801,7 +801,7 @@ async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: 
     
     # Use specific dimensions and metrics optimized for revenue analysis
     dimensions = "pagePath,sessionSource,country,deviceCategory"
-    metrics = "totalAdRevenue,screenPageViews,sessions,totalUsers"
+    metrics = "totalAdRevenue,publisherAdClicks,publisherAdImpressions,screenPageViews,sessions,totalUsers"
     
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
