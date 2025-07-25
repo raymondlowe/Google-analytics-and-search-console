@@ -145,6 +145,58 @@ def validate_date_range(start_date: str, end_date: str) -> bool:
     except ValueError:
         return False
 
+def validate_ga4_dimensions_metrics(dimensions: str, metrics: str) -> dict:
+    """
+    Validate GA4 dimensions and metrics against common mistakes and provide suggestions.
+    
+    Returns:
+        dict: {"valid": bool, "warnings": list, "suggestions": list}
+    """
+    result = {"valid": True, "warnings": [], "suggestions": []}
+    
+    # Common invalid dimensions and their corrections
+    invalid_dimensions = {
+        "sessionCampaign": "Use 'sessionCampaignId' for campaign ID or 'sessionCampaignName' for campaign name",
+        "pageviews": "Use 'screenPageViews' for page view count",
+        "users": "Use 'activeUsers' for current active users or 'totalUsers' for all users",
+        "sessions": "sessions is a metric, not a dimension",
+        "bounceRate": "bounceRate is a metric, not a dimension"
+    }
+    
+    # Common invalid metrics and their corrections  
+    invalid_metrics = {
+        "pageviews": "Use 'screenPageViews' for page view count",
+        "users": "Use 'activeUsers' for current active users or 'totalUsers' for all users",
+        "pagePath": "pagePath is a dimension, not a metric",
+        "country": "country is a dimension, not a metric"
+    }
+    
+    # Check dimensions
+    if dimensions:
+        dim_list = [d.strip() for d in dimensions.split(',')]
+        for dim in dim_list:
+            if dim in invalid_dimensions:
+                result["valid"] = False
+                result["warnings"].append(f"Invalid dimension '{dim}': {invalid_dimensions[dim]}")
+    
+    # Check metrics
+    if metrics:
+        metric_list = [m.strip() for m in metrics.split(',')]
+        for metric in metric_list:
+            if metric in invalid_metrics:
+                result["valid"] = False
+                result["warnings"].append(f"Invalid metric '{metric}': {invalid_metrics[metric]}")
+    
+    # Add general suggestions if any issues found
+    if not result["valid"]:
+        result["suggestions"].extend([
+            "Verify dimensions and metrics at: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema",
+            "Use the 'list_ga4_properties' tool first to ensure you have access to the property",
+            "Test with simple, known-valid dimensions like 'pagePath' and metrics like 'screenPageViews'"
+        ])
+    
+    return result
+
 def get_default_date_range(days: int = 30) -> dict:
     """Get default date range (last N days)"""
     end_date = pd.Timestamp.now()
@@ -165,11 +217,30 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     - Analyze user behavior patterns and demographics
     - Identify top-performing content for SEO optimization
     
-    Common Dimensions: pagePath, hostname, country, deviceCategory, sessionSource, sessionMedium, 
-                      sessionCampaign, date, hour, dayOfWeek, language, operatingSystem, browser
+    ⚠️ IMPORTANT: Dimension & Metric Validation
+    Only use valid GA4 dimensions and metrics. Invalid ones will cause 400 errors.
     
-    Common Metrics: screenPageViews, sessions, totalUsers, activeUsers, averageSessionDuration,
-                   bounceRate, totalAdRevenue, screenPageViewsPerSession, sessionDuration
+    📋 Common Valid Dimensions:
+    - Page/Content: pagePath, pageTitle, hostname, landingPage
+    - User/Session: country, city, deviceCategory, browser, operatingSystem
+    - Traffic Source: sessionSource, sessionMedium, sessionCampaignId, sessionCampaignName
+    - Time: date, hour, dayOfWeek, month, year
+    - Custom: Use format "customEvent:parameter_name" for event-scoped custom dimensions
+    
+    📊 Common Valid Metrics:
+    - Page Views: screenPageViews, screenPageViewsPerSession, screenPageViewsPerUser
+    - Users: activeUsers, newUsers, totalUsers, sessions, sessionsPerUser
+    - Engagement: averageSessionDuration, bounceRate, engagementRate, engagedSessions
+    - Revenue: totalAdRevenue, totalRevenue, averageRevenuePerUser
+    - Events: eventCount, eventCountPerUser, keyEvents
+    
+    🚫 Common Mistakes to Avoid:
+    - ❌ sessionCampaign → ✅ sessionCampaignId or sessionCampaignName
+    - ❌ pageviews → ✅ screenPageViews  
+    - ❌ users → ✅ activeUsers or totalUsers
+    - ❌ Invalid custom dimensions without proper "customEvent:" prefix
+    
+    📖 Full Reference: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema
     
     Example: Find top revenue-generating pages by traffic source:
     - dimensions: "pagePath,sessionSource,sessionMedium"  
@@ -203,6 +274,20 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
         error_msg = "Invalid date range"
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}: {start_date} to {end_date}")
         return {"status": "error", "message": error_msg, "request_id": request_id}
+    
+    # Validate dimensions and metrics before API call
+    validation_result = validate_ga4_dimensions_metrics(dimensions, metrics)
+    if not validation_result["valid"]:
+        error_msg = "Invalid dimensions or metrics detected"
+        validation_details = {
+            "status": "error", 
+            "message": error_msg,
+            "warnings": validation_result["warnings"],
+            "suggestions": validation_result["suggestions"],
+            "request_id": request_id
+        }
+        logger.warning(f"[{request_id}] GA4 query failed - {error_msg}: {validation_result['warnings']}")
+        return validation_details
     
     try:
         if property_id:
@@ -459,6 +544,52 @@ async def query_unified_data(start_date: str, end_date: str, auth_identifier: st
     return {"status": "success", "message": f"Retrieved data from {len(results)} source(s)", "results": results}
 
 @mcp.tool()
+async def validate_ga4_parameters(dimensions: str = "", metrics: str = "") -> dict:
+    """
+    Validate GA4 dimensions and metrics before making API calls to avoid errors.
+    
+    Use this tool to check if your dimensions and metrics are valid before querying data.
+    This helps prevent 400 errors and provides helpful suggestions for corrections.
+    
+    Args:
+        dimensions: Comma-separated dimensions to validate (optional)
+        metrics: Comma-separated metrics to validate (optional)
+        
+    Returns:
+        dict: Validation results with warnings and suggestions
+    """
+    request_id = str(uuid.uuid4())[:8]
+    
+    if not dimensions and not metrics:
+        return {
+            "status": "error",
+            "message": "Please provide dimensions or metrics to validate",
+            "request_id": request_id
+        }
+    
+    validation_result = validate_ga4_dimensions_metrics(dimensions, metrics)
+    
+    response = {
+        "status": "success" if validation_result["valid"] else "warning",
+        "message": "Parameters validated",
+        "valid": validation_result["valid"],
+        "request_id": request_id
+    }
+    
+    if validation_result["warnings"]:
+        response["warnings"] = validation_result["warnings"]
+    
+    if validation_result["suggestions"]:
+        response["suggestions"] = validation_result["suggestions"]
+    
+    if validation_result["valid"]:
+        response["message"] = "All dimensions and metrics appear valid"
+    else:
+        response["message"] = "Issues found with dimensions or metrics"
+    
+    return response
+
+@mcp.tool()
 async def list_ga4_properties(auth_identifier: str = "", debug: bool = False) -> dict:
     """
     List all available GA4 properties for the authenticated account.
@@ -605,7 +736,7 @@ async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: s
         return {"status": "error", "message": "start_date and end_date are required parameters"}
     
     # Use specific dimensions and metrics optimized for traffic source analysis
-    dimensions = "sessionSource,sessionMedium,sessionCampaign,country"
+    dimensions = "sessionSource,sessionMedium,sessionCampaignId,country"
     metrics = "sessions,totalUsers,averageSessionDuration,bounceRate,screenPageViews"
     
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)

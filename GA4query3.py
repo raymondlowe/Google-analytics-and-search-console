@@ -164,13 +164,27 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         return df # Return the DataFrame
 
     except Exception as api_error:
-        # Pass through the complete error message for debugging
-        error_msg = f"GA4 API Error for property {property_name} ({property_id}): {str(api_error)}"
+        # Enhanced error handling with dimension validation suggestions
+        error_str = str(api_error)
+        error_msg = f"GA4 API Error for property {property_name} ({property_id}): {error_str}"
+        
+        # Provide helpful suggestions for common dimension/metric errors
+        if "is not a valid dimension" in error_str:
+            # Extract the invalid dimension name from the error message
+            if "sessionCampaign" in error_str:
+                error_msg += "\n💡 Suggestion: Use 'sessionCampaignId' for campaign ID or 'sessionCampaignName' for campaign name instead of 'sessionCampaign'"
+            elif "Field" in error_str and "is not a valid dimension" in error_str:
+                error_msg += "\n💡 Suggestion: Check the GA4 API documentation for valid dimensions: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema"
+        elif "is not a valid metric" in error_str:
+            error_msg += "\n💡 Suggestion: Check the GA4 API documentation for valid metrics: https://developers.google.com/analytics/devguides/reporting/data/v1/api-schema"
+        elif "400" in error_str and ("dimension" in error_str.lower() or "metric" in error_str.lower()):
+            error_msg += "\n💡 Suggestion: Verify your dimensions and metrics are valid for GA4. Common dimensions include: pagePath, country, deviceCategory, sessionSource, sessionMedium, sessionCampaignId"
+        
         if debug:
             print(error_msg)
             import traceback
             traceback.print_exc()
-        # Re-raise the exception with the full context so it can be caught by higher-level handlers
+        # Re-raise the exception with the enhanced context
         raise Exception(error_msg) from api_error
 
 
