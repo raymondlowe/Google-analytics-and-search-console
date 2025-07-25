@@ -544,6 +544,13 @@ class BearerTokenMiddleware:
     """
     Middleware to handle Bearer token authentication for HTTP mode.
     Provides secure API key validation with proper error handling and logging.
+    
+    Authentication Methods (in order of preference):
+    1. Authorization header: "Bearer <token>" (recommended, most secure)
+    2. URL parameter: "?key=<token>" (fallback for clients that can't send headers)
+    
+    Security Note: URL parameters are logged in server logs and browser history.
+    Use Authorization headers when possible for better security.
     """
     
     def __init__(self, app, api_key: str):
@@ -562,33 +569,45 @@ class BearerTokenMiddleware:
         request = Request(scope, receive)
         client_ip = request.client.host if request.client else 'unknown'
         
-        # Check if Authorization header is present
+        token = None
+        auth_method = None
+        
+        # Primary authentication: Check Authorization header
         auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            self.logger.warning(f"Authentication failed: Missing Authorization header from {client_ip}")
+        if auth_header:
+            if not auth_header.startswith("Bearer "):
+                self.logger.warning(f"Authentication failed: Invalid Authorization header format from {client_ip}")
+                response = JSONResponse(
+                    status_code=401,
+                    content={"error": "Invalid Authorization header format. Expected 'Bearer <token>'"}
+                )
+                await response(scope, receive, send)
+                return
+            
+            token = auth_header[7:]  # Remove "Bearer " prefix
+            auth_method = "header"
+        
+        # Fallback authentication: Check URL parameter
+        elif "key" in request.query_params:
+            token = request.query_params.get("key")
+            auth_method = "url_param"
+            self.logger.info(f"Using URL parameter authentication from {client_ip} (consider using Authorization header for better security)")
+        
+        # No authentication provided
+        if not token:
+            self.logger.warning(f"Authentication failed: No Authorization header or key parameter from {client_ip}")
             response = JSONResponse(
                 status_code=401,
-                content={"error": "Missing Authorization header"}
+                content={
+                    "error": "Authentication required. Provide either 'Authorization: Bearer <token>' header or '?key=<token>' URL parameter"
+                }
             )
             await response(scope, receive, send)
             return
-        
-        # Check if it's a Bearer token
-        if not auth_header.startswith("Bearer "):
-            self.logger.warning(f"Authentication failed: Invalid Authorization header format from {client_ip}")
-            response = JSONResponse(
-                status_code=401,
-                content={"error": "Invalid Authorization header format. Expected 'Bearer <token>'"}
-            )
-            await response(scope, receive, send)
-            return
-        
-        # Extract the token
-        token = auth_header[7:]  # Remove "Bearer " prefix
         
         # Validate the token using secure comparison to prevent timing attacks
         if not secure_compare(token, self.api_key):
-            self.logger.warning(f"Authentication failed: Invalid API key from {client_ip}")
+            self.logger.warning(f"Authentication failed: Invalid API key via {auth_method} from {client_ip}")
             response = JSONResponse(
                 status_code=401,
                 content={"error": "Invalid API key"}
@@ -597,7 +616,7 @@ class BearerTokenMiddleware:
             return
         
         # Token is valid, log success and proceed
-        self.logger.debug(f"Authentication successful from {client_ip}")
+        self.logger.debug(f"Authentication successful via {auth_method} from {client_ip}")
         await self.app(scope, receive, send)
 
 if __name__ == "__main__":
@@ -633,7 +652,7 @@ if __name__ == "__main__":
             "query_analysis_gsc",
             "page_query_opportunities_gsc"
         ]
-        print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent:\n")
+        print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent (RECOMMENDED - Header Auth):\n")
         print("{")
         print('  "mcpServers": {')
         print('    "ga4-gsc-mcp": {')
@@ -652,6 +671,24 @@ if __name__ == "__main__":
         print('}')
         print("➡️  Paste this block into your repository’s Copilot coding agent MCP configuration \n")
 
+        
+        # Add fallback configuration for clients that don't support Authorization headers
+        url_with_key = f"{scheme}://{display_host}:{port}/mcp?key={api_key}"
+        print("🔗 Alternative config for clients that don't support Authorization headers (FALLBACK - URL Auth):\n")
+        print("{")
+        print('  "mcpServers": {')
+        print('    "ga4-gsc-mcp": {')
+        print('      "type": "http",')
+        print(f'      "url": "{url_with_key}",')
+        print('      "tools": [')
+        for i, tool in enumerate(tools):
+            comma = "," if i < len(tools) - 1 else ""
+            print(f'        "{tool}"{comma}')
+        print('      ]')
+        print('    }')
+        print('  }')
+        print('}')
+        print("⚠️  URL-based auth exposes the key in logs. Use header auth when possible.\n")
     # Patch: Set a global debug flag and patch all tool functions to pass debug if not explicitly set
     DEBUG_FLAG = args.debug
 
