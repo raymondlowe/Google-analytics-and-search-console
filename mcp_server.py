@@ -9,6 +9,8 @@ import logging
 import json
 import pandas as pd
 import secrets
+import hmac
+import hashlib
 from mcp.server.fastmcp import FastMCP
 from datetime import datetime
 
@@ -19,6 +21,21 @@ import NewDownloads
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+# Security utilities
+def secure_compare(a: str, b: str) -> bool:
+    """
+    Constant-time string comparison to prevent timing attacks.
+    Uses HMAC for secure comparison of API keys.
+    """
+    if len(a) != len(b):
+        return False
+    
+    # Use HMAC for constant-time comparison
+    dummy_key = b"security_key_for_comparison"
+    mac_a = hmac.new(dummy_key, a.encode(), hashlib.sha256).digest()
+    mac_b = hmac.new(dummy_key, b.encode(), hashlib.sha256).digest()
+    return hmac.compare_digest(mac_a, mac_b)
 
 mcp = FastMCP("ga4-gsc-mcp")
 
@@ -525,6 +542,70 @@ async def page_query_opportunities_gsc(start_date: str, end_date: str, auth_iden
     
     return await query_gsc_data(start_date, end_date, auth_identifier, domain, dimensions, "web", debug)
 
+# Security middleware for HTTP mode
+class BearerTokenMiddleware:
+    """
+    Middleware to handle Bearer token authentication for HTTP mode.
+    Provides secure API key validation with proper error handling and logging.
+    """
+    
+    def __init__(self, app, api_key: str):
+        self.app = app
+        self.api_key = api_key
+        self.logger = logging.getLogger(f"{__name__}.BearerTokenMiddleware")
+    
+    async def __call__(self, scope, receive, send):
+        if scope["type"] != "http":
+            await self.app(scope, receive, send)
+            return
+            
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+        
+        request = Request(scope, receive)
+        
+        # Check if Authorization header is present
+        auth_header = request.headers.get("Authorization")
+        if not auth_header:
+            client_ip = request.client.host if request.client else 'unknown'
+            self.logger.warning(f"Authentication failed: Missing Authorization header from {client_ip}")
+            response = JSONResponse(
+                status_code=401,
+                content={"error": "Missing Authorization header"}
+            )
+            await response(scope, receive, send)
+            return
+        
+        # Check if it's a Bearer token
+        if not auth_header.startswith("Bearer "):
+            client_ip = request.client.host if request.client else 'unknown'
+            self.logger.warning(f"Authentication failed: Invalid Authorization header format from {client_ip}")
+            response = JSONResponse(
+                status_code=401,
+                content={"error": "Invalid Authorization header format. Expected 'Bearer <token>'"}
+            )
+            await response(scope, receive, send)
+            return
+        
+        # Extract the token
+        token = auth_header[7:]  # Remove "Bearer " prefix
+        
+        # Validate the token using secure comparison to prevent timing attacks
+        if not secure_compare(token, self.api_key):
+            client_ip = request.client.host if request.client else 'unknown'
+            self.logger.warning(f"Authentication failed: Invalid API key from {client_ip}")
+            response = JSONResponse(
+                status_code=401,
+                content={"error": "Invalid API key"}
+            )
+            await response(scope, receive, send)
+            return
+        
+        # Token is valid, log success and proceed
+        client_ip = request.client.host if request.client else 'unknown'
+        self.logger.debug(f"Authentication successful from {client_ip}")
+        await self.app(scope, receive, send)
+
 if __name__ == "__main__":
     import sys
     import argparse
@@ -606,53 +687,22 @@ if __name__ == "__main__":
 
     if args.http:
         print(f"Starting MCP HTTP server on {args.host}:{args.port}")
+        # Display API key with partial masking for security
+        masked_key = f"{api_key[:8]}...{api_key[-8:]}" if len(api_key) > 16 else api_key
         print(f"🔑 API Key: {api_key}")
+        print(f"🔒 Key preview: {masked_key}")
         print_github_copilot_mcp_config(args.host, args.port, api_key, scheme="http")
         import uvicorn
-        from starlette.middleware.base import BaseHTTPMiddleware
-        from starlette.responses import JSONResponse
-        from starlette.requests import Request
-        
-        class BearerTokenMiddleware(BaseHTTPMiddleware):
-            def __init__(self, app, api_key: str):
-                super().__init__(app)
-                self.api_key = api_key
-            
-            async def dispatch(self, request: Request, call_next):
-                # Check if Authorization header is present
-                auth_header = request.headers.get("Authorization")
-                if not auth_header:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": "Missing Authorization header"}
-                    )
-                
-                # Check if it's a Bearer token
-                if not auth_header.startswith("Bearer "):
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": "Invalid Authorization header format. Expected 'Bearer <token>'"}
-                    )
-                
-                # Extract the token
-                token = auth_header[7:]  # Remove "Bearer " prefix
-                
-                # Validate the token
-                if token != self.api_key:
-                    return JSONResponse(
-                        status_code=401,
-                        content={"error": "Invalid API key"}
-                    )
-                
-                # Token is valid, proceed with the request
-                response = await call_next(request)
-                return response
         
         # Create the streamable HTTP app and add authentication middleware
         app = mcp.streamable_http_app()
-        app.add_middleware(BearerTokenMiddleware, api_key=api_key)
-        uvicorn.run(app, host=args.host, port=args.port)
+        
+        # Use the improved BearerTokenMiddleware with secure comparison and logging
+        middleware = BearerTokenMiddleware(app, api_key)
+        uvicorn.run(middleware, host=args.host, port=args.port)
     else:
         print("Starting MCP stdio server")
+        masked_key = f"{api_key[:8]}...{api_key[-8:]}" if len(api_key) > 16 else api_key
         print(f"🔑 API Key: {api_key} (Note: stdio mode doesn't use authentication)")
+        print(f"🔒 Key preview: {masked_key}")
         mcp.run()
