@@ -175,11 +175,15 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     - dimensions: "pagePath,sessionSource,sessionMedium"  
     - metrics: "screenPageViews,totalAdRevenue,sessions"
     
+    Filtering Behavior:
+    - When property_id is specified: No domain filtering applied (for maximum data reliability)
+    - When property_id is omitted: domain_filter applies to all properties (for cross-property filtering)
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
         property_id: Specific GA4 property ID (optional, queries all properties if not specified)
-        domain_filter: Filter by hostname (optional)
+        domain_filter: Filter by hostname (optional, only applied when querying all properties)
         metrics: Comma-separated metrics (default: screenPageViews,totalAdRevenue)
         dimensions: Comma-separated dimensions (default: pagePath)
         debug: Enable debug output
@@ -200,18 +204,18 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}: {start_date} to {end_date}")
         return {"status": "error", "message": error_msg, "request_id": request_id}
     
-    filter_expr = f"hostname=={domain_filter}" if domain_filter else None
-    
     try:
         if property_id:
             logger.info(f"[{request_id}] Querying single GA4 property: {property_id}")
+            # When property_id is specified, don't apply domain filtering for better reliability
+            # Property ID already targets the specific property, additional filtering can exclude valid data
             df = GA4query3.produce_report(
                 start_date=start_date,
                 end_date=end_date,
                 property_id=property_id,
                 property_name="MCP_Property",
                 account=auth_identifier,
-                filter_expression=filter_expr,
+                filter_expression=None,  # No domain filtering when property_id is specified
                 dimensions=dimensions,
                 metrics=metrics,
                 debug=debug
@@ -227,6 +231,11 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
             logger.info(f"[{request_id}] Found {len(properties_df)} GA4 properties to query")
             combined_df = pd.DataFrame()
             errors = []
+            
+            # Apply domain filtering only when querying all properties (to filter results across properties)
+            filter_expr = f"hostname=={domain_filter}" if domain_filter else None
+            if domain_filter:
+                logger.info(f"[{request_id}] Applying domain filter for all properties: {domain_filter}")
             
             for idx, row in properties_df.iterrows():
                 pid = row.get("property_id") or row.get("id")
