@@ -14,3 +14,4 @@ urllib3
 tqdm
 gradio>=5.0.0
 win-unicode-console>=0.5
+diskcache>=5.6.3

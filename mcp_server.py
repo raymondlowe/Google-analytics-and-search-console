@@ -454,7 +454,9 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
     
     try:
         logger.info(f"Fetching GSC data with dimensions: {dimensions}")
-        df = NewDownloads.fetch_search_console_data(
+        
+        # Use the optimized async version for better performance
+        df = await NewDownloads.fetch_search_console_data_async(
             start_date=start_date,
             end_date=end_date,
             search_type=search_type,
@@ -911,6 +913,7 @@ async def get_server_stats(include_details: bool = False) -> dict:
     - Performance metrics (average response times)
     - Rate limiting statistics
     - Active session information
+    - Domain cache performance (NEW - for timeout optimization)
     
     Returns data optimized for: Server monitoring, performance analysis, security auditing
     
@@ -933,6 +936,12 @@ async def get_server_stats(include_details: bool = False) -> dict:
         # Get request tracker stats
         tracker_stats = request_tracker.get_stats()
         
+        # Get domain cache stats for performance monitoring
+        domain_cache_stats = NewDownloads.get_domain_cache_stats()
+        
+        # Get disk cache stats for comprehensive monitoring  
+        disk_cache_stats = NewDownloads.get_disk_cache_stats()
+        
         # Get basic auth stats (since middleware might not be available in stdio mode)
         auth_stats = {
             'auth_stats': {},
@@ -945,6 +954,8 @@ async def get_server_stats(include_details: bool = False) -> dict:
             'message': 'Server statistics retrieved successfully',
             'basic_info': basic_stats,
             'request_metrics': tracker_stats,
+            'domain_cache_metrics': domain_cache_stats,  # Memory-based domain cache
+            'disk_cache_metrics': disk_cache_stats,      # Persistent disk cache
             'authentication_metrics': auth_stats.get('auth_stats', {}),
             'rate_limiting': {
                 'unique_ips': auth_stats.get('unique_ips', 0),
@@ -960,7 +971,9 @@ async def get_server_stats(include_details: bool = False) -> dict:
                                max(tracker_stats.get('total_requests', 1), 1)) * 100,
                 'auth_failure_rate': (tracker_stats.get('auth_failures', 0) / 
                                      max(tracker_stats.get('total_requests', 1), 1)) * 100,
-                'avg_response_time_ms': tracker_stats.get('avg_response_time', 0) * 1000
+                'avg_response_time_ms': tracker_stats.get('avg_response_time', 0) * 1000,
+                'cache_hit_rate': (domain_cache_stats.get('valid_entries', 0) / 
+                                 max(domain_cache_stats.get('total_entries', 1), 1)) * 100 if domain_cache_stats.get('total_entries', 0) > 0 else 0
             }
         
         logger.info(f"Server stats retrieved - {tracker_stats.get('total_requests', 0)} total requests processed")
@@ -968,6 +981,104 @@ async def get_server_stats(include_details: bool = False) -> dict:
         
     except Exception as e:
         error_msg = f"Failed to retrieve server statistics: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return {
+            'status': 'error',
+            'message': error_msg,
+            'request_id': request_id
+        }
+
+
+@mcp.tool()
+async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dict:
+    """
+    Invalidate server caches to force fresh data retrieval.
+    
+    Business Purpose: Allow manual cache invalidation when fresh data is needed
+    or when troubleshooting performance issues.
+    
+    Args:
+        cache_type: Type of cache to invalidate ('domain', 'disk', or 'all')
+        account: Specific account to invalidate (empty = all accounts)
+        
+    Returns:
+        dict: Operation status and cache statistics
+    """
+    request_id = str(uuid.uuid4())[:8]
+    set_request_context(request_id)
+    
+    try:
+        if cache_type.lower() == "domain":
+            # Get stats before invalidation
+            stats_before = NewDownloads.get_domain_cache_stats()
+            
+            # Invalidate cache
+            NewDownloads.invalidate_domain_cache(account if account else None)
+            
+            # Get stats after invalidation
+            stats_after = NewDownloads.get_domain_cache_stats()
+            
+            logger.info(f"Domain cache invalidated - account: {account or 'all'}")
+            
+            return {
+                'status': 'success',
+                'message': f"Domain cache invalidated for {account or 'all accounts'}",
+                'cache_stats_before': stats_before,
+                'cache_stats_after': stats_after,
+                'request_id': request_id
+            }
+        elif cache_type.lower() == "disk":
+            # Get stats before invalidation
+            stats_before = NewDownloads.get_disk_cache_stats()
+            
+            # Clear disk cache
+            NewDownloads.clear_disk_cache()
+            
+            # Get stats after invalidation  
+            stats_after = NewDownloads.get_disk_cache_stats()
+            
+            logger.info(f"Disk cache cleared")
+            
+            return {
+                'status': 'success',
+                'message': 'Disk cache cleared',
+                'cache_stats_before': stats_before,
+                'cache_stats_after': stats_after,
+                'request_id': request_id
+            }
+        elif cache_type.lower() == "all":
+            # Get stats before invalidation
+            domain_stats_before = NewDownloads.get_domain_cache_stats()
+            disk_stats_before = NewDownloads.get_disk_cache_stats()
+            
+            # Invalidate all caches
+            NewDownloads.invalidate_domain_cache(account if account else None)
+            NewDownloads.clear_disk_cache()
+            
+            # Get stats after invalidation
+            domain_stats_after = NewDownloads.get_domain_cache_stats()
+            disk_stats_after = NewDownloads.get_disk_cache_stats()
+            
+            logger.info(f"All caches invalidated - account: {account or 'all'}")
+            
+            return {
+                'status': 'success',
+                'message': f"All caches invalidated for {account or 'all accounts'}",
+                'domain_cache_before': domain_stats_before,
+                'domain_cache_after': domain_stats_after,
+                'disk_cache_before': disk_stats_before,
+                'disk_cache_after': disk_stats_after,
+                'request_id': request_id
+            }
+        else:
+            return {
+                'status': 'error',
+                'message': f"Unknown cache type: {cache_type}. Supported types: 'domain', 'disk', 'all'",
+                'request_id': request_id
+            }
+            
+    except Exception as e:
+        error_msg = f"Failed to invalidate cache: {str(e)}"
         logger.error(error_msg, exc_info=True)
         return {
             'status': 'error',
@@ -1227,7 +1338,8 @@ if __name__ == "__main__":
             "page_performance_gsc",
             "query_analysis_gsc",
             "page_query_opportunities_gsc",
-            "get_server_stats"
+            "get_server_stats",
+            "invalidate_cache"
         ]
         print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent (RECOMMENDED - Header Auth):\n")
         print("{")
@@ -1284,7 +1396,8 @@ if __name__ == "__main__":
         "page_performance_gsc",
         "query_analysis_gsc",
         "page_query_opportunities_gsc",
-        "get_server_stats"
+        "get_server_stats",
+        "invalidate_cache"
     ]:
         orig_func = getattr(mcp, tool_name, None)
         if orig_func is not None:
