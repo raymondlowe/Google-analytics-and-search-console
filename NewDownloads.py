@@ -462,14 +462,24 @@ def fetch_search_console_data(
     try:
         # Try to get the current event loop
         loop = asyncio.get_running_loop()
-        # If we're already in an async context, we can't use asyncio.run()
-        # In this case, return a coroutine that can be awaited
-        return fetch_search_console_data_async(
-            start_date, end_date, search_type, dimensions, google_account,
-            wait_seconds, debug, domain_filter, max_retries, retry_delay
-        )
+        # If we're already in an async context, create a new thread to run the async function
+        # This prevents "RuntimeError: cannot be called from a running event loop"
+        import concurrent.futures
+        import threading
+        
+        def run_async_in_thread():
+            return asyncio.run(fetch_search_console_data_async(
+                start_date, end_date, search_type, dimensions, google_account,
+                wait_seconds, debug, domain_filter, max_retries, retry_delay
+            ))
+        
+        # Run in a separate thread to avoid blocking the main event loop
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_async_in_thread)
+            return future.result()
+            
     except RuntimeError:
-        # No event loop running, we can use asyncio.run()
+        # No event loop running, we can use asyncio.run() directly
         return asyncio.run(fetch_search_console_data_async(
             start_date, end_date, search_type, dimensions, google_account,
             wait_seconds, debug, domain_filter, max_retries, retry_delay
