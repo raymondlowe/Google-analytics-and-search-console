@@ -72,6 +72,7 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
         return wrapper
     return decorator
 
+@persistent_cache(expire_time=3600)  # Cache GA4 data for 1 hour
 def produce_report(start_date, end_date, property_id, property_name, account, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None, debug=False):
     """Fetches and processes data from the GA4 API for a single property and returns DataFrame using OAuth.
        Allows specifying dimensions and metrics as comma-separated strings.

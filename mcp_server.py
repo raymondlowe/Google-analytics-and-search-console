@@ -25,6 +25,7 @@ warnings.filterwarnings('ignore', message='file_cache is only supported with oau
 # Import our existing modules
 import GA4query3
 import NewDownloads
+from NewDownloads import async_persistent_cache
 
 # Configure enhanced logging with structured format but simpler format for compatibility
 logging.basicConfig(
@@ -206,6 +207,12 @@ def get_default_date_range(days: int = 30) -> dict:
         "end_date": end_date.strftime('%Y-%m-%d')
     }
 
+def add_today_date_to_response(response: dict) -> dict:
+    """Add today's date to response for AI client context"""
+    if isinstance(response, dict):
+        response["todays_date"] = datetime.now().strftime('%Y-%m-%d')
+    return response
+
 @mcp.tool()
 async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", metrics: str = "screenPageViews,totalAdRevenue,sessions", dimensions: str = "pagePath", debug: bool = False) -> dict:
     """
@@ -268,12 +275,12 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     if not start_date or not end_date:
         error_msg = "start_date and end_date are required parameters"
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}")
-        return {"status": "error", "message": error_msg, "request_id": request_id}
+        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
     
     if not validate_date_range(start_date, end_date):
         error_msg = "Invalid date range"
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}: {start_date} to {end_date}")
-        return {"status": "error", "message": error_msg, "request_id": request_id}
+        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
     
     # Validate dimensions and metrics before API call
     validation_result = validate_ga4_dimensions_metrics(dimensions, metrics)
@@ -284,7 +291,8 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
             "message": error_msg,
             "warnings": validation_result["warnings"],
             "suggestions": validation_result["suggestions"],
-            "request_id": request_id
+            "request_id": request_id,
+            "todays_date": datetime.now().strftime('%Y-%m-%d')
         }
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}: {validation_result['warnings']}")
         return validation_details
@@ -311,7 +319,7 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
             if properties_df is None or properties_df.empty:
                 error_msg = "No GA4 properties found"
                 logger.warning(f"[{request_id}] GA4 query failed - {error_msg}")
-                return {"status": "error", "message": error_msg, "request_id": request_id}
+                return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
             
             logger.info(f"[{request_id}] Found {len(properties_df)} GA4 properties to query")
             combined_df = pd.DataFrame()
@@ -368,18 +376,19 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
                     "source": "ga4",
                     "errors": errors,
                     "request_id": request_id,
-                    "duration_seconds": round(duration, 2)
+                    "duration_seconds": round(duration, 2),
+                    "todays_date": datetime.now().strftime('%Y-%m-%d')
                 }
             elif errors and (df is None or df.empty):
                 # All properties failed, return error with all details
                 error_msg = f"All properties failed: {'; '.join(errors)}"
                 logger.error(f"GA4 query failed completely - {error_msg}")
-                return {"status": "error", "message": error_msg, "request_id": request_id}
+                return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
         
         if df is not None and not df.empty:
             duration = time.time() - start_time
             logger.info(f"GA4 query successful - {len(df)} rows retrieved in {duration:.2f}s")
-            return {
+            response = {
                 "status": "success",
                 "message": f"Retrieved {len(df)} rows of GA4 data",
                 "date_range": {"start_date": start_date, "end_date": end_date},
@@ -387,25 +396,29 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
                 "row_count": len(df),
                 "source": "ga4",
                 "request_id": request_id,
-                "duration_seconds": round(duration, 2)
+                "duration_seconds": round(duration, 2),
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
+            return response
         else:
             duration = time.time() - start_time
             logger.info(f"GA4 query completed - no data found in {duration:.2f}s")
-            return {
+            response = {
                 "status": "success", 
                 "message": "No GA4 data found for the specified criteria", 
                 "data": [], 
                 "row_count": 0, 
                 "source": "ga4",
                 "request_id": request_id,
-                "duration_seconds": round(duration, 2)
+                "duration_seconds": round(duration, 2),
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
+            return response
     except Exception as e:
         duration = time.time() - start_time
         error_msg = f"GA4 query failed: {str(e)}"
         logger.error(f"GA4 query exception - {error_msg}, duration: {duration:.2f}s", exc_info=True)
-        return {"status": "error", "message": error_msg, "request_id": request_id}
+        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
 
 @mcp.tool()
 async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", dimensions: str = "page,query,country,device", search_type: str = "web", debug: bool = False) -> dict:
@@ -445,12 +458,12 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
     if not start_date or not end_date:
         error_msg = "start_date and end_date are required parameters"
         logger.warning(f"GSC query failed - {error_msg}")
-        return {"status": "error", "message": error_msg, "request_id": request_id}
+        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
     
     if not validate_date_range(start_date, end_date):
         error_msg = "Invalid date range"
         logger.warning(f"GSC query failed - {error_msg}: {start_date} to {end_date}")
-        return {"status": "error", "message": error_msg, "request_id": request_id}
+        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
     
     try:
         logger.info(f"Fetching GSC data with dimensions: {dimensions}")
@@ -479,7 +492,8 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
                 "row_count": len(df),
                 "source": "gsc",
                 "request_id": request_id,
-                "duration_seconds": round(duration, 2)
+                "duration_seconds": round(duration, 2),
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
         else:
             duration = time.time() - start_time
@@ -491,13 +505,14 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
                 "row_count": 0, 
                 "source": "gsc",
                 "request_id": request_id,
-                "duration_seconds": round(duration, 2)
+                "duration_seconds": round(duration, 2),
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
     except Exception as e:
         duration = time.time() - start_time
         error_msg = f"GSC query failed: {str(e)}"
         logger.error(f"GSC query exception - {error_msg}, duration: {duration:.2f}s", exc_info=True)
-        return {"status": "error", "message": error_msg, "request_id": request_id}
+        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
 
 @mcp.tool()
 async def query_unified_data(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", ga4_property_id: str = "", data_sources: list = ["ga4", "gsc"], debug: bool = False) -> dict:
@@ -522,9 +537,9 @@ async def query_unified_data(start_date: str, end_date: str, auth_identifier: st
         debug: Enable debug output
     """
     if not start_date or not end_date:
-        return {"status": "error", "message": "start_date and end_date are required parameters"}
+        return {"status": "error", "message": "start_date and end_date are required parameters", "todays_date": datetime.now().strftime('%Y-%m-%d')}
     if not validate_date_range(start_date, end_date):
-        return {"status": "error", "message": "Invalid date range"}
+        return {"status": "error", "message": "Invalid date range", "todays_date": datetime.now().strftime('%Y-%m-%d')}
     results = []
     errors = []
     if "ga4" in data_sources:
@@ -540,10 +555,10 @@ async def query_unified_data(start_date: str, end_date: str, auth_identifier: st
         else:
             errors.append(gsc_result.get("message"))
     if not results and errors:
-        return {"status": "error", "message": "; ".join(errors)}
+        return {"status": "error", "message": "; ".join(errors), "todays_date": datetime.now().strftime('%Y-%m-%d')}
     if errors:
-        return {"status": "partial_success", "message": f"Retrieved data from {len(results)} source(s) with {len(errors)} error(s)", "errors": errors, "results": results}
-    return {"status": "success", "message": f"Retrieved data from {len(results)} source(s)", "results": results}
+        return {"status": "partial_success", "message": f"Retrieved data from {len(results)} source(s) with {len(errors)} error(s)", "errors": errors, "results": results, "todays_date": datetime.now().strftime('%Y-%m-%d')}
+    return {"status": "success", "message": f"Retrieved data from {len(results)} source(s)", "results": results, "todays_date": datetime.now().strftime('%Y-%m-%d')}
 
 @mcp.tool()
 async def validate_ga4_parameters(dimensions: str = "", metrics: str = "") -> dict:
@@ -566,7 +581,8 @@ async def validate_ga4_parameters(dimensions: str = "", metrics: str = "") -> di
         return {
             "status": "error",
             "message": "Please provide dimensions or metrics to validate",
-            "request_id": request_id
+            "request_id": request_id,
+            "todays_date": datetime.now().strftime('%Y-%m-%d')
         }
     
     validation_result = validate_ga4_dimensions_metrics(dimensions, metrics)
@@ -575,7 +591,8 @@ async def validate_ga4_parameters(dimensions: str = "", metrics: str = "") -> di
         "status": "success" if validation_result["valid"] else "warning",
         "message": "Parameters validated",
         "valid": validation_result["valid"],
-        "request_id": request_id
+        "request_id": request_id,
+        "todays_date": datetime.now().strftime('%Y-%m-%d')
     }
     
     if validation_result["warnings"]:
@@ -615,7 +632,8 @@ async def list_ga4_properties(auth_identifier: str = "", debug: bool = False) ->
                 "status": "success",
                 "message": f"Found {len(properties_df)} GA4 properties",
                 "properties": properties_df.to_dict('records'),
-                "request_id": request_id
+                "request_id": request_id,
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
         else:
             logger.info(f"[{request_id}] No GA4 properties found")
@@ -623,7 +641,8 @@ async def list_ga4_properties(auth_identifier: str = "", debug: bool = False) ->
                 "status": "success", 
                 "message": "No GA4 properties found", 
                 "properties": [],
-                "request_id": request_id
+                "request_id": request_id,
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
     except Exception as e:
         error_msg = f"Failed to list GA4 properties: {str(e)}"
@@ -631,7 +650,8 @@ async def list_ga4_properties(auth_identifier: str = "", debug: bool = False) ->
         return {
             "status": "error", 
             "message": error_msg,
-            "request_id": request_id
+            "request_id": request_id,
+            "todays_date": datetime.now().strftime('%Y-%m-%d')
         }
 
 @mcp.tool()
@@ -658,7 +678,8 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
                 "status": "success",
                 "message": f"Found {len(domains_df)} GSC domains",
                 "domains": domains_df.to_dict('records'),
-                "request_id": request_id
+                "request_id": request_id,
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
         else:
             logger.info(f"[{request_id}] No GSC domains found")
@@ -666,7 +687,8 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
                 "status": "success", 
                 "message": "No GSC domains found", 
                 "domains": [],
-                "request_id": request_id
+                "request_id": request_id,
+                "todays_date": datetime.now().strftime('%Y-%m-%d')
             }
     except Exception as e:
         error_msg = f"Failed to list GSC domains: {str(e)}"
@@ -674,12 +696,14 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
         return {
             "status": "error", 
             "message": error_msg,
-            "request_id": request_id
+            "request_id": request_id,
+            "todays_date": datetime.now().strftime('%Y-%m-%d')
         }
 
 # Focused GA4 Business-Intent Tools
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache page performance queries for 1 hour
 async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze page performance metrics for content optimization and SEO.
@@ -712,6 +736,7 @@ async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: 
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache traffic sources queries for 1 hour
 async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze traffic sources to understand how visitors find your website.
@@ -744,6 +769,7 @@ async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: s
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache audience analysis queries for 1 hour
 async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze your website audience demographics and behavior patterns.
@@ -776,6 +802,7 @@ async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier:
     return await query_ga4_data(start_date, end_date, auth_identifier, property_id, domain_filter, metrics, dimensions, debug)
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache revenue analysis queries for 1 hour
 async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze AdSense revenue and monetization performance across your website.
@@ -810,6 +837,7 @@ async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: 
 # Focused GSC Business-Intent Tools
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache GSC page performance queries for 1 hour
 async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", debug: bool = False) -> dict:
     """
     Analyze page performance in Google Search to identify SEO optimization opportunities.
@@ -840,6 +868,7 @@ async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: 
     return await query_gsc_data(start_date, end_date, auth_identifier, domain, dimensions, "web", debug)
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache GSC query analysis for 1 hour
 async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", debug: bool = False) -> dict:
     """
     Analyze search query performance to identify keyword opportunities and content gaps.
@@ -870,6 +899,7 @@ async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: st
     return await query_gsc_data(start_date, end_date, auth_identifier, domain, dimensions, "web", debug)
 
 @mcp.tool()
+@async_persistent_cache(expire_time=3600)  # Cache GSC page-query opportunities for 1 hour
 async def page_query_opportunities_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", debug: bool = False) -> dict:
     """
     Analyze page-query combinations to find content optimization opportunities.
@@ -930,7 +960,8 @@ async def get_server_stats(include_details: bool = False) -> dict:
         basic_stats = {
             'server_uptime_seconds': time.time() - start_time,
             'current_time': datetime.now().isoformat(),
-            'request_id': request_id
+            'request_id': request_id,
+            'todays_date': datetime.now().strftime('%Y-%m-%d')
         }
         
         # Get request tracker stats
@@ -985,7 +1016,8 @@ async def get_server_stats(include_details: bool = False) -> dict:
         return {
             'status': 'error',
             'message': error_msg,
-            'request_id': request_id
+            'request_id': request_id,
+            'todays_date': datetime.now().strftime('%Y-%m-%d')
         }
 
 
@@ -1025,7 +1057,8 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
                 'message': f"Domain cache invalidated for {account or 'all accounts'}",
                 'cache_stats_before': stats_before,
                 'cache_stats_after': stats_after,
-                'request_id': request_id
+                'request_id': request_id,
+                'todays_date': datetime.now().strftime('%Y-%m-%d')
             }
         elif cache_type.lower() == "disk":
             # Get stats before invalidation
@@ -1044,7 +1077,8 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
                 'message': 'Disk cache cleared',
                 'cache_stats_before': stats_before,
                 'cache_stats_after': stats_after,
-                'request_id': request_id
+                'request_id': request_id,
+                'todays_date': datetime.now().strftime('%Y-%m-%d')
             }
         elif cache_type.lower() == "all":
             # Get stats before invalidation
@@ -1068,13 +1102,15 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
                 'domain_cache_after': domain_stats_after,
                 'disk_cache_before': disk_stats_before,
                 'disk_cache_after': disk_stats_after,
-                'request_id': request_id
+                'request_id': request_id,
+                'todays_date': datetime.now().strftime('%Y-%m-%d')
             }
         else:
             return {
                 'status': 'error',
                 'message': f"Unknown cache type: {cache_type}. Supported types: 'domain', 'disk', 'all'",
-                'request_id': request_id
+                'request_id': request_id,
+                'todays_date': datetime.now().strftime('%Y-%m-%d')
             }
             
     except Exception as e:
@@ -1083,7 +1119,8 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
         return {
             'status': 'error',
             'message': error_msg,
-            'request_id': request_id
+            'request_id': request_id,
+            'todays_date': datetime.now().strftime('%Y-%m-%d')
         }
     """
     Analyze page-query combinations to find content optimization opportunities.
