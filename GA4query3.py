@@ -1,6 +1,7 @@
 import os
 import sys
 from datetime import datetime
+from functools import wraps
 from google_auth_oauthlib.flow import InstalledAppFlow
 import google.auth.transport.requests
 from google.oauth2.credentials import Credentials
@@ -11,10 +12,65 @@ import argparse
 import pandas as pd
 from tqdm import tqdm # Import tqdm
 from dateutil.relativedelta import relativedelta # Import dateutil for date calculations
+import diskcache as dc
 
 # Import the Admin API client library
 from google.analytics.admin_v1beta import AnalyticsAdminServiceClient
 from google.analytics.admin_v1beta.types import ListPropertiesRequest # Import ListPropertiesRequest
+
+# Disk-based cache for GA4 properties (they rarely change)
+_cache_dir = os.path.join(os.path.expanduser("~"), ".ga_gsc_cache")
+os.makedirs(_cache_dir, exist_ok=True)
+_ga4_cache = dc.Cache(_cache_dir, size_limit=500 * 1024 * 1024)  # 500MB limit
+
+def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA4 properties
+    """
+    Disk-based cache decorator with configurable expiration time.
+    
+    Args:
+        expire_time (int): Cache expiration time in seconds (default: 7 days)
+        typed (bool): Whether to cache based on argument types as well
+    
+    Returns:
+        Decorator function
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Create cache key from function name and arguments
+            cache_key = f"{func.__name__}:{hash((args, tuple(sorted(kwargs.items()))))}"
+            if typed:
+                cache_key += f":{hash(tuple(type(arg) for arg in args))}"
+            
+            # Try to get from cache
+            cached_result = _ga4_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Cache miss - call function and cache result
+            result = func(*args, **kwargs)
+            _ga4_cache.set(cache_key, result, expire=expire_time)
+            return result
+        
+        # Add cache management methods to the function
+        def cache_info():
+            """Get cache statistics"""
+            return {
+                'cache_size': len(_ga4_cache),
+                'cache_directory': _cache_dir,
+                'function': func.__name__
+            }
+        
+        def cache_clear():
+            """Clear cache for this function"""
+            keys_to_delete = [key for key in _ga4_cache if key.startswith(f"{func.__name__}:")]
+            for key in keys_to_delete:
+                del _ga4_cache[key]
+        
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+        return wrapper
+    return decorator
 
 def produce_report(start_date, end_date, property_id, property_name, account, filter_expression=None, dimensions='pagePath', metrics='screenPageViews', test=None, debug=False):
     """Fetches and processes data from the GA4 API for a single property and returns DataFrame using OAuth.
@@ -188,6 +244,7 @@ def produce_report(start_date, end_date, property_id, property_name, account, fi
         raise Exception(error_msg) from api_error
 
 
+@persistent_cache(expire_time=86400*7)  # Cache for 7 days since GA4 properties rarely change
 def list_properties(account, debug=False):
     """Lists available GA4 properties for the authenticated user using Admin API,
        iterating through accounts to ensure all properties are listed.

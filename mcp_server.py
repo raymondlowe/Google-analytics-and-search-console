@@ -939,6 +939,9 @@ async def get_server_stats(include_details: bool = False) -> dict:
         # Get domain cache stats for performance monitoring
         domain_cache_stats = NewDownloads.get_domain_cache_stats()
         
+        # Get disk cache stats for comprehensive monitoring  
+        disk_cache_stats = NewDownloads.get_disk_cache_stats()
+        
         # Get basic auth stats (since middleware might not be available in stdio mode)
         auth_stats = {
             'auth_stats': {},
@@ -951,7 +954,8 @@ async def get_server_stats(include_details: bool = False) -> dict:
             'message': 'Server statistics retrieved successfully',
             'basic_info': basic_stats,
             'request_metrics': tracker_stats,
-            'domain_cache_metrics': domain_cache_stats,  # NEW: Cache performance
+            'domain_cache_metrics': domain_cache_stats,  # Memory-based domain cache
+            'disk_cache_metrics': disk_cache_stats,      # Persistent disk cache
             'authentication_metrics': auth_stats.get('auth_stats', {}),
             'rate_limiting': {
                 'unique_ips': auth_stats.get('unique_ips', 0),
@@ -994,7 +998,7 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
     or when troubleshooting performance issues.
     
     Args:
-        cache_type: Type of cache to invalidate ('domain' for GSC domain cache)
+        cache_type: Type of cache to invalidate ('domain', 'disk', or 'all')
         account: Specific account to invalidate (empty = all accounts)
         
     Returns:
@@ -1023,10 +1027,53 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
                 'cache_stats_after': stats_after,
                 'request_id': request_id
             }
+        elif cache_type.lower() == "disk":
+            # Get stats before invalidation
+            stats_before = NewDownloads.get_disk_cache_stats()
+            
+            # Clear disk cache
+            NewDownloads.clear_disk_cache()
+            
+            # Get stats after invalidation  
+            stats_after = NewDownloads.get_disk_cache_stats()
+            
+            logger.info(f"Disk cache cleared")
+            
+            return {
+                'status': 'success',
+                'message': 'Disk cache cleared',
+                'cache_stats_before': stats_before,
+                'cache_stats_after': stats_after,
+                'request_id': request_id
+            }
+        elif cache_type.lower() == "all":
+            # Get stats before invalidation
+            domain_stats_before = NewDownloads.get_domain_cache_stats()
+            disk_stats_before = NewDownloads.get_disk_cache_stats()
+            
+            # Invalidate all caches
+            NewDownloads.invalidate_domain_cache(account if account else None)
+            NewDownloads.clear_disk_cache()
+            
+            # Get stats after invalidation
+            domain_stats_after = NewDownloads.get_domain_cache_stats()
+            disk_stats_after = NewDownloads.get_disk_cache_stats()
+            
+            logger.info(f"All caches invalidated - account: {account or 'all'}")
+            
+            return {
+                'status': 'success',
+                'message': f"All caches invalidated for {account or 'all accounts'}",
+                'domain_cache_before': domain_stats_before,
+                'domain_cache_after': domain_stats_after,
+                'disk_cache_before': disk_stats_before,
+                'disk_cache_after': disk_stats_after,
+                'request_id': request_id
+            }
         else:
             return {
                 'status': 'error',
-                'message': f"Unknown cache type: {cache_type}. Supported types: 'domain'",
+                'message': f"Unknown cache type: {cache_type}. Supported types: 'domain', 'disk', 'all'",
                 'request_id': request_id
             }
             

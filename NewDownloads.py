@@ -5,12 +5,15 @@ import asyncio
 import threading
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
+from functools import wraps
+import os
 import pandas as pd
 from pandas import ExcelWriter
 import openpyxl
 from progress.bar import IncrementalBar
 from googleAPIget_service import get_service
 from urllib.parse import urlparse
+import diskcache as dc
 
 # Import win_unicode_console only when needed for CLI
 try:
@@ -28,10 +31,113 @@ class CachedDomainList:
     timestamp: float
     account: str
 
+# Disk-based cache for persistent caching across sessions
+_cache_dir = os.path.join(os.path.expanduser("~"), ".ga_gsc_cache")
+os.makedirs(_cache_dir, exist_ok=True)
+_disk_cache = dc.Cache(_cache_dir, size_limit=500 * 1024 * 1024)  # 500MB limit
+
+def persistent_cache(expire_time=86400, typed=False):
+    """
+    Disk-based cache decorator with configurable expiration time.
+    
+    Args:
+        expire_time (int): Cache expiration time in seconds (default: 24 hours)
+        typed (bool): Whether to cache based on argument types as well
+    
+    Returns:
+        Decorator function
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Create cache key from function name and arguments
+            cache_key = f"{func.__name__}:{hash((args, tuple(sorted(kwargs.items()))))}"
+            if typed:
+                cache_key += f":{hash(tuple(type(arg) for arg in args))}"
+            
+            # Try to get from cache
+            cached_result = _disk_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Cache miss - call function and cache result
+            result = func(*args, **kwargs)
+            _disk_cache.set(cache_key, result, expire=expire_time)
+            return result
+        
+        # Add cache management methods to the function
+        def cache_info():
+            """Get cache statistics"""
+            return {
+                'cache_size': len(_disk_cache),
+                'cache_directory': _cache_dir,
+                'function': func.__name__
+            }
+        
+        def cache_clear():
+            """Clear cache for this function"""
+            keys_to_delete = [key for key in _disk_cache if key.startswith(f"{func.__name__}:")]
+            for key in keys_to_delete:
+                del _disk_cache[key]
+        
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+        return wrapper
+    return decorator
+
+def async_persistent_cache(expire_time=86400, typed=False):
+    """
+    Async version of persistent_cache decorator.
+    
+    Args:
+        expire_time (int): Cache expiration time in seconds (default: 24 hours)
+        typed (bool): Whether to cache based on argument types as well
+    
+    Returns:
+        Async decorator function
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Create cache key from function name and arguments
+            cache_key = f"{func.__name__}:{hash((args, tuple(sorted(kwargs.items()))))}"
+            if typed:
+                cache_key += f":{hash(tuple(type(arg) for arg in args))}"
+            
+            # Try to get from cache
+            cached_result = _disk_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Cache miss - call function and cache result
+            result = await func(*args, **kwargs)
+            _disk_cache.set(cache_key, result, expire=expire_time)
+            return result
+        
+        # Add cache management methods to the function
+        def cache_info():
+            """Get cache statistics"""
+            return {
+                'cache_size': len(_disk_cache),
+                'cache_directory': _cache_dir,
+                'function': func.__name__
+            }
+        
+        def cache_clear():
+            """Clear cache for this function"""
+            keys_to_delete = [key for key in _disk_cache if key.startswith(f"{func.__name__}:")]
+            for key in keys_to_delete:
+                del _disk_cache[key]
+        
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+        return wrapper
+    return decorator
+
 class DomainCache:
     """Thread-safe cache for GSC domain lists to optimize performance"""
     
-    def __init__(self, ttl_seconds: int = 300):  # 5 minute default TTL
+    def __init__(self, ttl_seconds: int = 86400):  # 24 hour default TTL (domain lists rarely change)
         self.ttl_seconds = ttl_seconds
         self._cache: Dict[str, CachedDomainList] = {}
         self._lock = threading.Lock()
@@ -80,6 +186,7 @@ class DomainCache:
 _domain_cache = DomainCache()
 
 
+@persistent_cache(expire_time=86400*7)  # Cache for 7 days since domain lists rarely change
 def list_search_console_sites(google_account="", debug=False, use_cache=True):
     """
     List all available Google Search Console sites/domains for the authenticated account.
@@ -489,12 +596,41 @@ def fetch_search_console_data(
 # Add cache management functions
 def get_domain_cache_stats():
     """Get domain cache statistics for monitoring"""
-    return _domain_cache.get_stats()
+    domain_stats = _domain_cache.get_stats()
+    disk_stats = {
+        'disk_cache_size': len(_disk_cache),
+        'disk_cache_directory': _cache_dir,
+        'disk_cache_volume_info': _disk_cache.volume()
+    }
+    return {**domain_stats, **disk_stats}
 
 
 def invalidate_domain_cache(account=None):
     """Invalidate domain cache for specific account or all accounts"""
     _domain_cache.invalidate(account)
+
+
+def get_disk_cache_stats():
+    """Get comprehensive disk cache statistics"""
+    return {
+        'size': len(_disk_cache),
+        'directory': _cache_dir,
+        'volume_info': _disk_cache.volume(),
+        'cache_info': _disk_cache.stats()
+    }
+
+
+def clear_disk_cache():
+    """Clear all disk cache entries"""
+    _disk_cache.clear()
+
+
+def clear_function_cache(function_name):
+    """Clear cache entries for a specific function"""
+    keys_to_delete = [key for key in _disk_cache if key.startswith(f"{function_name}:")]
+    for key in keys_to_delete:
+        del _disk_cache[key]
+    return len(keys_to_delete)
 
 
 def save_search_console_data(data_df, start_date, end_date, dimensions, name, search_type, google_account):
