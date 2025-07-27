@@ -1,12 +1,19 @@
 import argparse
 import datetime
 import time
+import asyncio
+import threading
+from dataclasses import dataclass
+from typing import Dict, List, Optional, Union
+from functools import wraps
+import os
 import pandas as pd
 from pandas import ExcelWriter
 import openpyxl
 from progress.bar import IncrementalBar
 from googleAPIget_service import get_service
 from urllib.parse import urlparse
+import diskcache as dc
 
 # Import win_unicode_console only when needed for CLI
 try:
@@ -16,14 +23,228 @@ except ImportError:
     # Skip if not available (e.g., when running in web environments)
     pass
 
+# Performance optimization: Domain caching to avoid repeated API calls
+@dataclass
+class CachedDomainList:
+    """Cached domain list with timestamp for TTL management"""
+    domains: List[Dict]
+    timestamp: float
+    account: str
 
-def list_search_console_sites(google_account="", debug=False):
+# Disk-based cache for persistent caching across sessions
+_cache_dir = os.path.join(os.path.expanduser("~"), ".ga_gsc_cache")
+os.makedirs(_cache_dir, exist_ok=True)
+_disk_cache = dc.Cache(_cache_dir, size_limit=500 * 1024 * 1024)  # 500MB limit
+
+def persistent_cache(expire_time=86400, typed=False):
+    """
+    Disk-based cache decorator with configurable expiration time.
+    
+    Args:
+        expire_time (int): Cache expiration time in seconds (default: 24 hours)
+        typed (bool): Whether to cache based on argument types as well
+    
+    Returns:
+        Decorator function
+    """
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            # Create stable cache key using SHA-256 for persistence
+            import hashlib
+            import json
+            
+            try:
+                # Serialize arguments to JSON for stable hashing
+                args_serializable = []
+                for arg in args:
+                    if hasattr(arg, '__dict__'):
+                        args_serializable.append(str(arg))
+                    else:
+                        args_serializable.append(arg)
+                
+                cache_data = {
+                    'function': func.__name__,
+                    'args': args_serializable,
+                    'kwargs': sorted(kwargs.items())
+                }
+                
+                if typed:
+                    cache_data['arg_types'] = [type(arg).__name__ for arg in args]
+                
+                # Create SHA-256 hash of serialized data
+                cache_string = json.dumps(cache_data, sort_keys=True, default=str)
+                cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
+            except (TypeError, ValueError):
+                # Fallback to stable hashing for non-serializable args
+                fallback_string = str(args) + str(sorted(kwargs.items()))
+                cache_key = f"{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+            
+            # Try to get from cache
+            cached_result = _disk_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Cache miss - call function and cache result
+            result = func(*args, **kwargs)
+            _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+            return result
+        
+        # Add cache management methods to the function
+        def cache_info():
+            """Get cache statistics"""
+            return {
+                'cache_size': len(_disk_cache),
+                'cache_directory': _cache_dir,
+                'function': func.__name__
+            }
+        
+        def cache_clear():
+            """Clear cache for this function using efficient tag-based eviction"""
+            _disk_cache.evict(func.__name__)
+        
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+        return wrapper
+    return decorator
+
+def async_persistent_cache(expire_time=86400, typed=False):
+    """
+    Async version of persistent_cache decorator.
+    
+    Args:
+        expire_time (int): Cache expiration time in seconds (default: 24 hours)
+        typed (bool): Whether to cache based on argument types as well
+    
+    Returns:
+        Async decorator function
+    """
+    def decorator(func):
+        @wraps(func)
+        async def wrapper(*args, **kwargs):
+            # Create stable cache key using SHA-256 for persistence
+            import hashlib
+            import json
+            
+            try:
+                # Serialize arguments to JSON for stable hashing
+                args_serializable = []
+                for arg in args:
+                    if hasattr(arg, '__dict__'):
+                        args_serializable.append(str(arg))
+                    else:
+                        args_serializable.append(arg)
+                
+                cache_data = {
+                    'function': func.__name__,
+                    'args': args_serializable,
+                    'kwargs': sorted(kwargs.items())
+                }
+                
+                if typed:
+                    cache_data['arg_types'] = [type(arg).__name__ for arg in args]
+                
+                # Create SHA-256 hash of serialized data
+                cache_string = json.dumps(cache_data, sort_keys=True, default=str)
+                cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
+            except (TypeError, ValueError):
+                # Fallback to stable hashing for non-serializable args
+                fallback_string = str(args) + str(sorted(kwargs.items()))
+                cache_key = f"{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+            
+            # Try to get from cache
+            cached_result = _disk_cache.get(cache_key)
+            if cached_result is not None:
+                return cached_result
+            
+            # Cache miss - call function and cache result
+            result = await func(*args, **kwargs)
+            _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+            return result
+        
+        # Add cache management methods to the function
+        def cache_info():
+            """Get cache statistics"""
+            return {
+                'cache_size': len(_disk_cache),
+                'cache_directory': _cache_dir,
+                'function': func.__name__
+            }
+        
+        def cache_clear():
+            """Clear cache for this function using efficient tag-based eviction"""
+            _disk_cache.evict(func.__name__)
+        
+        wrapper.cache_info = cache_info
+        wrapper.cache_clear = cache_clear
+        return wrapper
+    return decorator
+
+class DomainCache:
+    """Thread-safe cache for GSC domain lists to optimize performance"""
+    
+    def __init__(self, ttl_seconds: int = 86400):  # 24 hour default TTL (domain lists rarely change)
+        self.ttl_seconds = ttl_seconds
+        self._cache: Dict[str, CachedDomainList] = {}
+        self._lock = threading.Lock()
+    
+    def get(self, account: str) -> Optional[List[Dict]]:
+        """Get cached domain list if still valid"""
+        with self._lock:
+            cached = self._cache.get(account)
+            if cached and (time.time() - cached.timestamp) < self.ttl_seconds:
+                return cached.domains
+            return None
+    
+    def set(self, account: str, domains: List[Dict]) -> None:
+        """Cache domain list with current timestamp"""
+        with self._lock:
+            self._cache[account] = CachedDomainList(
+                domains=domains,
+                timestamp=time.time(),
+                account=account
+            )
+    
+    def invalidate(self, account: str = None) -> None:
+        """Invalidate cache for specific account or all accounts"""
+        with self._lock:
+            if account:
+                self._cache.pop(account, None)
+            else:
+                self._cache.clear()
+    
+    def get_stats(self) -> Dict:
+        """Get cache statistics for monitoring"""
+        with self._lock:
+            current_time = time.time()
+            valid_entries = sum(
+                1 for cached in self._cache.values()
+                if (current_time - cached.timestamp) < self.ttl_seconds
+            )
+            return {
+                'total_entries': len(self._cache),
+                'valid_entries': valid_entries,
+                'expired_entries': len(self._cache) - valid_entries,
+                'ttl_seconds': self.ttl_seconds
+            }
+
+# Global domain cache instance
+_domain_cache = DomainCache()
+
+def get_current_date():
+    """Get current date in YYYY-MM-DD format for AI clients"""
+    return datetime.datetime.now().strftime('%Y-%m-%d')
+
+
+@persistent_cache(expire_time=86400*7)  # Cache for 7 days since domain lists rarely change
+def list_search_console_sites(google_account="", debug=False, use_cache=True):
     """
     List all available Google Search Console sites/domains for the authenticated account.
     
     Args:
         google_account (str): Google account identifier for secrets/tokens
         debug (bool): Enable debug output
+        use_cache (bool): Use cached domain list if available (default: True)
         
     Returns:
         pandas.DataFrame: DataFrame with site URLs and domains, or None if error
@@ -48,6 +269,15 @@ def list_search_console_sites(google_account="", debug=False):
     all_sites = []
 
     for this_google_account in googleaccounts_list:
+        # Check cache first if enabled
+        if use_cache:
+            cached_sites = _domain_cache.get(this_google_account)
+            if cached_sites:
+                if debug:
+                    print(f"Using cached domain list for account: {this_google_account if this_google_account else 'default'}")
+                all_sites.extend(cached_sites)
+                continue
+        
         if debug:
             print("Processing: " + (this_google_account if this_google_account else "default client_secrets.json"))
         
@@ -63,6 +293,8 @@ def list_search_console_sites(google_account="", debug=False):
             
             if debug:
                 print(f"Found {len(profiles['siteEntry'])} site entries")
+            
+            account_sites = []  # Sites for this specific account
             
             for item in profiles['siteEntry']:
                 if item['permissionLevel'] != 'siteUnverifiedUser':
@@ -85,7 +317,14 @@ def list_search_console_sites(google_account="", debug=False):
                         'property_type': property_type,
                         'account': this_google_account if this_google_account else 'default'
                     }
+                    account_sites.append(site_info)
                     all_sites.append(site_info)
+            
+            # Cache the sites for this account
+            if use_cache and account_sites:
+                _domain_cache.set(this_google_account, account_sites)
+                if debug:
+                    print(f"Cached {len(account_sites)} sites for account: {this_google_account if this_google_account else 'default'}")
                     
         except Exception as e:
             if debug:
@@ -101,7 +340,8 @@ def list_search_console_sites(google_account="", debug=False):
         return None
 
 
-def fetch_search_console_data(
+@async_persistent_cache(expire_time=3600)  # Cache GSC data for 1 hour 
+async def fetch_search_console_data_async(
     start_date,
     end_date,
     search_type="web",
@@ -114,7 +354,7 @@ def fetch_search_console_data(
     retry_delay=5
 ):
     """
-    Fetch data from Google Search Console API.
+    Async version of fetch_search_console_data with performance optimizations.
     
     Args:
         start_date (str): Start date in format yyyy-mm-dd or 'yesterday', '7DaysAgo'
@@ -136,213 +376,312 @@ def fetch_search_console_data(
     dimensions_array = dimensions.split(",")
     multi_dimension = len(dimensions_array) > 1
     
-    scope = ['https://www.googleapis.com/auth/webmasters.readonly']
-    
-    # Handle multiple google accounts if file is provided
-    if not google_account or google_account.strip() == "":
-        # No account specified, use only 'client_secrets.json' as secrets file
-        googleaccounts_list = [""]
-    else:
-        try:
-            googleaccounts_list = open(google_account).read().splitlines()
-            # remove empty lines
-            googleaccounts_list = [x.strip() for x in googleaccounts_list if x.strip()]
-        except:
-            googleaccounts_list = [google_account]
-
     if debug:
-        print(f"Processing {len(googleaccounts_list)} Google account(s)")
-
+        print(f"Starting async GSC data fetch - domain_filter: {domain_filter}")
+        cache_stats = _domain_cache.get_stats()
+        print(f"Domain cache stats: {cache_stats}")
+    
+    # Get cached domain list instead of making API calls every time
+    sites_df = await asyncio.to_thread(list_search_console_sites, google_account, debug, True)
+    
+    if sites_df is None or sites_df.empty:
+        if debug:
+            print("No sites found")
+        return pd.DataFrame()
+    
+    # Filter sites based on domain_filter early to avoid unnecessary API calls
+    if domain_filter:
+        filter_domain = domain_filter.lower().strip()
+        if filter_domain.startswith('www.'):
+            filter_domain = filter_domain[4:]
+        
+        # Filter sites to only those matching the domain filter
+        def matches_domain(row):
+            site_url = row['siteUrl']
+            if site_url.startswith('sc-domain:'):
+                current_domain = site_url[10:].lower()
+            else:
+                parsed = urlparse(site_url)
+                current_domain = parsed.hostname.lower() if parsed.hostname else ''
+            
+            if current_domain.startswith('www.'):
+                current_domain = current_domain[4:]
+            
+            return current_domain == filter_domain
+        
+        filtered_sites = sites_df[sites_df.apply(matches_domain, axis=1)]
+        
+        if debug:
+            print(f"Filtered {len(sites_df)} sites to {len(filtered_sites)} matching domain '{domain_filter}'")
+        
+        sites_df = filtered_sites
+    
+    if sites_df.empty:
+        if debug:
+            print(f"No sites match domain filter: {domain_filter}")
+        return pd.DataFrame()
+    
+    # Group sites by account for concurrent processing
+    sites_by_account = sites_df.groupby('account')
+    
+    if debug:
+        print(f"Processing {len(sites_df)} sites across {len(sites_by_account)} accounts")
+    
+    # Process accounts concurrently
+    account_tasks = []
+    for account, account_sites in sites_by_account:
+        task = _process_account_sites_async(
+            account, account_sites, start_date, end_date, search_type, 
+            dimensions_array, multi_dimension, wait_seconds, debug, 
+            max_retries, retry_delay
+        )
+        account_tasks.append(task)
+    
+    # Wait for all accounts to complete
+    account_results = await asyncio.gather(*account_tasks, return_exceptions=True)
+    
+    # Combine results
     combined_df = pd.DataFrame()
-
-    for this_google_account in googleaccounts_list:
-        if debug:
-            print("Processing: " + (this_google_account if this_google_account else "default client_secrets.json"))
-        # Authenticate and construct service
-        # If this_google_account is blank, use only 'client_secrets.json' as secrets file
-        service = get_service('webmasters', 'v3', scope, 'client_secrets.json', this_google_account)
-        profiles = service.sites().list().execute()
-        
-        if 'siteEntry' not in profiles:
+    for result in account_results:
+        if isinstance(result, Exception):
             if debug:
-                print("No siteEntry found for this profile")
+                print(f"Account processing failed: {result}")
             continue
-        
-        if debug:
-            print(f"Found {len(profiles['siteEntry'])} site entries")
-        
-        bar = IncrementalBar('Processing', max=len(profiles['siteEntry']))
-        
-        big_df = pd.DataFrame()
-        
-        for item in profiles['siteEntry']:
-            bar.next()
-            if item['permissionLevel'] != 'siteUnverifiedUser':
-                # Parse the hostname - handle both URL-prefix and domain properties
-                site_url = item['siteUrl']
-                
-                if site_url.startswith('sc-domain:'):
-                    # GSC Domain property (e.g., "sc-domain:example.com")
-                    root_domain = site_url[10:]  # Remove "sc-domain:" prefix
-                    if debug:
-                        print(f"Found domain property: {site_url} -> extracted domain: {root_domain}")
-                else:
-                    # URL-prefix property (e.g., "https://example.com/")
-                    root_domain = urlparse(site_url).hostname
-                    if debug and root_domain:
-                        print(f"Found URL-prefix property: {site_url} -> extracted hostname: {root_domain}")
-                
-                # Skip if rootDomain is None (shouldn't happen now, but keep as safety check)
-                if root_domain is None:
-                    if debug:
-                        print(f"Skipping property with unparseable domain: {site_url}")
-                    continue
-                
-                # Apply domain filter if specified
-                if domain_filter:
-                    # Normalize the domain filter and root domain for comparison
-                    filter_domain = domain_filter.lower().strip()
-                    if filter_domain.startswith('www.'):
-                        filter_domain = filter_domain[4:]
-                    
-                    current_domain = root_domain.lower()
-                    if current_domain.startswith('www.'):
-                        current_domain = current_domain[4:]
-                    
-                    # Skip if this domain doesn't match the filter
-                    if current_domain != filter_domain:
-                        if debug:
-                            print(f"Skipping {site_url} (normalized domain '{current_domain}' doesn't match filter '{filter_domain}')")
-                        continue
-                    
-                    if debug:
-                        print(f"Processing {site_url} (normalized domain '{current_domain}' matches filter '{filter_domain}')")
-                        
-                small_df = pd.DataFrame()
-                if wait_seconds > 0:
-                    if debug:
-                        print(f"Sleeping {wait_seconds} seconds")
-                    time.sleep(wait_seconds)
-                
-                if debug:
-                    print(f"Querying {item['siteUrl']} from {start_date} to {end_date}")
-                
-                # Add error handling for individual domain API calls with retry logic
-                retry_count = 0
-                success = False
-                
-                while retry_count <= max_retries and not success:
-                    try:
-                        if retry_count > 0:
-                            # Exponential backoff for retries
-                            backoff_delay = retry_delay * (2 ** (retry_count - 1))
-                            if debug:
-                                print(f"Retrying {item['siteUrl']} (attempt {retry_count}/{max_retries}) after {backoff_delay}s delay")
-                            time.sleep(backoff_delay)
-                        
-                        results = service.searchanalytics().query(
-                            siteUrl=item['siteUrl'], body={
-                                'startDate': start_date,
-                                'endDate': end_date,
-                                'dimensions': dimensions_array,
-                                'searchType': search_type,
-                                'rowLimit': 25000
-                            }).execute()
-                        
-                        success = True  # Mark as successful if we get here
-                        
-                        if 'rows' in results and len(results['rows']) > 0:
-                            small_df = small_df._append(results['rows'])
-                            
-                            if multi_dimension:
-                                # Handle multi-dimensional keys dynamically based on actual dimensions
-                                try:
-                                    if len(small_df) > 0 and 'keys' in small_df.columns:
-                                        keys_list = small_df['keys'].tolist()
-                                        if keys_list:
-                                            # Determine number of dimensions from the first row
-                                            first_keys = keys_list[0] if keys_list else []
-                                            num_dimensions = len(first_keys) if isinstance(first_keys, list) else 0
-                                            
-                                            if num_dimensions > 0:
-                                                # Create column names dynamically
-                                                key_columns = [f'key-{i+1}' for i in range(num_dimensions)]
-                                                
-                                                # Convert keys to DataFrame with proper number of columns
-                                                keys_df = pd.DataFrame(keys_list, index=small_df.index, columns=key_columns)
-                                                
-                                                # Add the new columns to small_df
-                                                for col in key_columns:
-                                                    small_df[col] = keys_df[col]
-                                except Exception as keys_error:
-                                    if debug:
-                                        print(f"Warning: Could not process multi-dimensional keys for {item['siteUrl']}: {keys_error}")
-                                    # Continue processing without expanding keys
-                            
-                            # Extract domain consistently with the filtering logic
-                            site_url = item['siteUrl']
-                            if site_url.startswith('sc-domain:'):
-                                # GSC Domain property (e.g., "sc-domain:example.com")
-                                root_domain_for_df = site_url[10:]  # Remove "sc-domain:" prefix
-                            else:
-                                # URL-prefix property (e.g., "https://example.com/")
-                                root_domain_for_df = urlparse(site_url).hostname
-                                
-                            # Normalize domain for DataFrame (remove www.)
-                            if root_domain_for_df and 'www.' in root_domain_for_df:
-                                root_domain_for_df = root_domain_for_df.replace('www.','')
-                            
-                            small_df.insert(0,'siteUrl',item['siteUrl'])
-                            small_df.insert(0,'rootDomain',root_domain_for_df)
-                            
-                            if len(big_df.columns) == 0:
-                                big_df = small_df.copy()
-                            else:
-                                big_df = pd.concat([big_df,small_df])
-                        elif debug:
-                            print(f"No data returned for {item['siteUrl']}")
-                            
-                    except Exception as e:
-                        retry_count += 1
-                        error_msg = f"Error fetching data for {item['siteUrl']} (attempt {retry_count}/{max_retries + 1}): {str(e)}"
-                        
-                        # Check if this is a rate limiting or server error that we should retry
-                        error_str = str(e).lower()
-                        should_retry = (retry_count <= max_retries and 
-                                      ('rate' in error_str or 'quota' in error_str or 
-                                       'timeout' in error_str or 'internal error' in error_str or
-                                       '500' in error_str or '503' in error_str or '429' in error_str))
-                        
-                        if should_retry:
-                            if debug:
-                                print(f"Retryable error: {error_msg}")
-                        else:
-                            # Final failure or non-retryable error
-                            if debug:
-                                print(f"Final error: {error_msg}")
-                            else:
-                                # Always show important failures even when not in debug mode
-                                print(f"Warning: {error_msg}")
-                            break
-        
-        bar.finish()
-        
-        big_df.reset_index()
-        
-        if len(big_df) > 0:
-            big_df['keys'] = big_df["keys"].str[0]
-            # Add the data from this account to the combined dataframe
-            combined_df = pd.concat([combined_df, big_df], sort=True)
-        
-        # Clean up objects used in this pass
-        del big_df
-        del profiles
-        del service
+        if result is not None and not result.empty:
+            combined_df = pd.concat([combined_df, result], sort=True)
     
     if len(combined_df) > 0:
         combined_df.reset_index(drop=True, inplace=True)
+        if debug:
+            print(f"Successfully retrieved {len(combined_df)} rows total")
     
     return combined_df
+
+
+async def _process_account_sites_async(
+    account, account_sites, start_date, end_date, search_type, 
+    dimensions_array, multi_dimension, wait_seconds, debug, 
+    max_retries, retry_delay
+):
+    """Process all sites for a single account concurrently"""
+    
+    scope = ['https://www.googleapis.com/auth/webmasters.readonly']
+    
+    try:
+        # Get service in thread to avoid blocking
+        service = await asyncio.to_thread(
+            get_service, 'webmasters', 'v3', scope, 'client_secrets.json', account
+        )
+        
+        # Process sites concurrently (but limit concurrency to avoid quota issues)
+        semaphore = asyncio.Semaphore(3)  # Limit to 3 concurrent requests per account
+        
+        site_tasks = []
+        for _, site_row in account_sites.iterrows():
+            task = _process_single_site_async(
+                semaphore, service, site_row, start_date, end_date, search_type,
+                dimensions_array, multi_dimension, wait_seconds, debug,
+                max_retries, retry_delay
+            )
+            site_tasks.append(task)
+        
+        # Wait for all sites in this account
+        site_results = await asyncio.gather(*site_tasks, return_exceptions=True)
+        
+        # Combine results for this account
+        account_df = pd.DataFrame()
+        for result in site_results:
+            if isinstance(result, Exception):
+                if debug:
+                    print(f"Site processing failed: {result}")
+                continue
+            if result is not None and not result.empty:
+                account_df = pd.concat([account_df, result])
+        
+        return account_df
+        
+    except Exception as e:
+        if debug:
+            print(f"Error processing account {account}: {str(e)}")
+        return pd.DataFrame()
+
+
+async def _process_single_site_async(
+    semaphore, service, site_row, start_date, end_date, search_type,
+    dimensions_array, multi_dimension, wait_seconds, debug,
+    max_retries, retry_delay
+):
+    """Process a single site with async support and retry logic"""
+    
+    async with semaphore:  # Limit concurrent requests
+        site_url = site_row['siteUrl']
+        root_domain = site_row['domain']
+        
+        if debug:
+            print(f"Querying {site_url} from {start_date} to {end_date}")
+        
+        if wait_seconds > 0:
+            await asyncio.sleep(wait_seconds)
+        
+        retry_count = 0
+        while retry_count <= max_retries:
+            try:
+                if retry_count > 0:
+                    backoff_delay = retry_delay * (2 ** (retry_count - 1))
+                    if debug:
+                        print(f"Retrying {site_url} (attempt {retry_count}/{max_retries}) after {backoff_delay}s delay")
+                    await asyncio.sleep(backoff_delay)
+                
+                # Make API call in thread to avoid blocking
+                results = await asyncio.to_thread(
+                    lambda: service.searchanalytics().query(
+                        siteUrl=site_url, body={
+                            'startDate': start_date,
+                            'endDate': end_date,
+                            'dimensions': dimensions_array,
+                            'searchType': search_type,
+                            'rowLimit': 25000
+                        }
+                    ).execute()
+                )
+                
+                if 'rows' in results and len(results['rows']) > 0:
+                    small_df = pd.DataFrame(results['rows'])
+                    
+                    if multi_dimension:
+                        # Handle multi-dimensional keys
+                        try:
+                            if len(small_df) > 0 and 'keys' in small_df.columns:
+                                keys_list = small_df['keys'].tolist()
+                                if keys_list:
+                                    first_keys = keys_list[0] if keys_list else []
+                                    num_dimensions = len(first_keys) if isinstance(first_keys, list) else 0
+                                    
+                                    if num_dimensions > 0:
+                                        key_columns = [f'key-{i+1}' for i in range(num_dimensions)]
+                                        keys_df = pd.DataFrame(keys_list, index=small_df.index, columns=key_columns)
+                                        for col in key_columns:
+                                            small_df[col] = keys_df[col]
+                        except Exception as keys_error:
+                            if debug:
+                                print(f"Warning: Could not process multi-dimensional keys for {site_url}: {keys_error}")
+                    
+                    # Add domain and site info
+                    small_df.insert(0, 'siteUrl', site_url)
+                    small_df.insert(0, 'rootDomain', root_domain)
+                    
+                    return small_df
+                
+                elif debug:
+                    print(f"No data returned for {site_url}")
+                
+                return pd.DataFrame()
+                
+            except Exception as e:
+                retry_count += 1
+                error_str = str(e).lower()
+                should_retry = (retry_count <= max_retries and 
+                              ('rate' in error_str or 'quota' in error_str or 
+                               'timeout' in error_str or 'internal error' in error_str or
+                               '500' in error_str or '503' in error_str or '429' in error_str))
+                
+                if should_retry:
+                    if debug:
+                        print(f"Retryable error for {site_url} (attempt {retry_count}/{max_retries + 1}): {str(e)}")
+                else:
+                    if debug:
+                        print(f"Final error for {site_url}: {str(e)}")
+                    break
+        
+        return pd.DataFrame()
+
+
+def fetch_search_console_data(
+    start_date,
+    end_date,
+    search_type="web",
+    dimensions="page",
+    google_account="",
+    wait_seconds=0,
+    debug=False,
+    domain_filter=None,
+    max_retries=3,
+    retry_delay=5
+):
+    """
+    Synchronous wrapper for the async fetch_search_console_data_async function.
+    
+    This maintains backward compatibility while providing optimized performance.
+    For best performance, use fetch_search_console_data_async directly in async contexts.
+    """
+    if debug:
+        print("Using optimized GSC data fetcher (async version)")
+    
+    try:
+        # Try to get the current event loop
+        loop = asyncio.get_running_loop()
+        # If we're already in an async context, create a new thread to run the async function
+        # This prevents "RuntimeError: cannot be called from a running event loop"
+        import concurrent.futures
+        import threading
+        
+        def run_async_in_thread():
+            return asyncio.run(fetch_search_console_data_async(
+                start_date, end_date, search_type, dimensions, google_account,
+                wait_seconds, debug, domain_filter, max_retries, retry_delay
+            ))
+        
+        # Run in a separate thread to avoid blocking the main event loop
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            future = executor.submit(run_async_in_thread)
+            return future.result()
+            
+    except RuntimeError:
+        # No event loop running, we can use asyncio.run() directly
+        return asyncio.run(fetch_search_console_data_async(
+            start_date, end_date, search_type, dimensions, google_account,
+            wait_seconds, debug, domain_filter, max_retries, retry_delay
+        ))
+
+
+# Add cache management functions
+def get_domain_cache_stats():
+    """Get domain cache statistics for monitoring"""
+    domain_stats = _domain_cache.get_stats()
+    disk_stats = {
+        'disk_cache_size': len(_disk_cache),
+        'disk_cache_directory': _cache_dir,
+        'disk_cache_volume_info': _disk_cache.volume()
+    }
+    return {**domain_stats, **disk_stats}
+
+
+def invalidate_domain_cache(account=None):
+    """Invalidate domain cache for specific account or all accounts"""
+    _domain_cache.invalidate(account)
+
+
+def get_disk_cache_stats():
+    """Get comprehensive disk cache statistics"""
+    return {
+        'size': len(_disk_cache),
+        'directory': _cache_dir,
+        'volume_info': _disk_cache.volume(),
+        'cache_info': _disk_cache.stats()
+    }
+
+
+def clear_disk_cache():
+    """Clear all disk cache entries"""
+    _disk_cache.clear()
+
+
+def clear_function_cache(function_name):
+    """Clear cache entries for a specific function"""
+    keys_to_delete = [key for key in _disk_cache if key.startswith(f"{function_name}:")]
+    for key in keys_to_delete:
+        del _disk_cache[key]
+    return len(keys_to_delete)
 
 
 def save_search_console_data(data_df, start_date, end_date, dimensions, name, search_type, google_account):
