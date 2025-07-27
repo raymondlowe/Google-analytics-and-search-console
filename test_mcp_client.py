@@ -6,8 +6,11 @@ import asyncio
 import subprocess
 import time
 import json
+import sys
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+sys.stdout.reconfigure(encoding='utf-8')  # Ensure UTF-8 output in Windows terminal
 
 async def test_mcp_server():
     """Test the MCP server by connecting as a client and calling tools"""
@@ -93,7 +96,7 @@ async def test_mcp_server():
     return True
 
 if __name__ == "__main__":
-    print("🚀 Starting MCP Server Test")
+    print("Starting MCP Server Test")
     success = asyncio.run(test_mcp_server())
     if success:
         print("\n🎊 ALL TESTS PASSED - Your MCP server is working!")
