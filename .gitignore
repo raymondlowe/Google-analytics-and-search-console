@@ -10,3 +10,4 @@ __pycache__/
 consolidated*
 *.log
 node_modules/
+*metadata.txt
