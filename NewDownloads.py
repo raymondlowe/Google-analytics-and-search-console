@@ -91,7 +91,8 @@ def persistent_cache(expire_time=86400, typed=False):
                     cached_result = _disk_cache.get(cache_key)
                 except Exception as e:
                     # Cache read failed - log and continue without cache
-                    print(f"GSC cache read failed for {func.__name__}: {e}")
+                    import logging
+                    logging.getLogger(__name__).warning(f"GSC cache read failed for {func.__name__}: {e}")
                     cached_result = None
             
             if cached_result is not None:
@@ -106,7 +107,8 @@ def persistent_cache(expire_time=86400, typed=False):
                     _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
                 except Exception as e:
                     # Cache write failed - log but don't fail the function
-                    print(f"GSC cache write failed for {func.__name__}: {e}")
+                    import logging
+                    logging.getLogger(__name__).warning(f"GSC cache write failed for {func.__name__}: {e}")
             
             return result
         
@@ -135,7 +137,7 @@ def persistent_cache(expire_time=86400, typed=False):
                 _disk_cache.evict(func.__name__)
                 return True
             except Exception as e:
-                print(f"GSC cache clear failed for {func.__name__}: {e}")
+                import logging; logging.getLogger(__name__).warning(f"GSC cache clear failed for {func.__name__}: {e}")
                 return False
         
         def cache_validate():
@@ -210,7 +212,8 @@ def async_persistent_cache(expire_time=86400, typed=False):
                     cached_result = _disk_cache.get(cache_key)
                 except Exception as e:
                     # Cache read failed - log and continue without cache
-                    print(f"GSC async cache read failed for {func.__name__}: {e}")
+                    import logging
+                    logging.getLogger(__name__).warning(f"GSC async cache read failed for {func.__name__}: {e}")
                     cached_result = None
             
             if cached_result is not None:
@@ -225,7 +228,8 @@ def async_persistent_cache(expire_time=86400, typed=False):
                     _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
                 except Exception as e:
                     # Cache write failed - log but don't fail the function
-                    print(f"GSC async cache write failed for {func.__name__}: {e}")
+                    import logging
+                    logging.getLogger(__name__).warning(f"GSC async cache write failed for {func.__name__}: {e}")
             
             return result
         
@@ -254,7 +258,7 @@ def async_persistent_cache(expire_time=86400, typed=False):
                 _disk_cache.evict(func.__name__)
                 return True
             except Exception as e:
-                print(f"GSC cache clear failed for {func.__name__}: {e}")
+                import logging; logging.getLogger(__name__).warning(f"GSC cache clear failed for {func.__name__}: {e}")
                 return False
         
         def cache_validate():
@@ -283,6 +287,7 @@ class DomainCache:
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries  # Prevent memory bloat
         self._cache: Dict[str, CachedDomainList] = {}
+        self._access_order: List[str] = []  # Track access order for efficient LRU
         self._lock = threading.Lock()
         self._stats = {
             'hits': 0,
@@ -297,35 +302,47 @@ class DomainCache:
             with self._lock:
                 cached = self._cache.get(account)
                 if cached and (time.time() - cached.timestamp) < self.ttl_seconds:
+                    # Move to end of access order for LRU (O(1) operation)
+                    self._access_order.remove(account)
+                    self._access_order.append(account)
                     self._stats['hits'] += 1
                     return cached.domains
                 self._stats['misses'] += 1
                 return None
         except Exception as e:
             self._stats['errors'] += 1
-            print(f"Domain cache get error for account {account}: {e}")
+            import logging
+            logging.getLogger(__name__).warning(f"Domain cache get error for account {account}: {e}")
             return None
     
     def set(self, account: str, domains: List[Dict]) -> None:
-        """Cache domain list with current timestamp and size management"""
+        """Cache domain list with current timestamp and efficient LRU management"""
         try:
             with self._lock:
-                # Implement LRU eviction if cache is full
-                if len(self._cache) >= self.max_entries:
-                    # Remove oldest entry
-                    oldest_key = min(self._cache.keys(), 
-                                   key=lambda k: self._cache[k].timestamp)
-                    del self._cache[oldest_key]
-                    self._stats['evictions'] += 1
+                # Efficient LRU eviction if cache is full
+                if len(self._cache) >= self.max_entries and account not in self._cache:
+                    # Remove least recently used entry (first in access order)
+                    if self._access_order:
+                        lru_key = self._access_order.pop(0)  # O(1) operation
+                        self._cache.pop(lru_key, None)
+                        self._stats['evictions'] += 1
                 
+                # Update or add entry
                 self._cache[account] = CachedDomainList(
                     domains=domains,
                     timestamp=time.time(),
                     account=account
                 )
+                
+                # Update access order (remove if exists, then add to end)
+                if account in self._access_order:
+                    self._access_order.remove(account)
+                self._access_order.append(account)
+                
         except Exception as e:
             self._stats['errors'] += 1
-            print(f"Domain cache set error for account {account}: {e}")
+            import logging
+            logging.getLogger(__name__).warning(f"Domain cache set error for account {account}: {e}")
     
     def invalidate(self, account: str = None) -> None:
         """Invalidate cache for specific account or all accounts with error handling"""
@@ -333,11 +350,16 @@ class DomainCache:
             with self._lock:
                 if account:
                     self._cache.pop(account, None)
+                    # Remove from access order if present
+                    if account in self._access_order:
+                        self._access_order.remove(account)
                 else:
                     self._cache.clear()
+                    self._access_order.clear()
         except Exception as e:
             self._stats['errors'] += 1
-            print(f"Domain cache invalidate error: {e}")
+            import logging
+            logging.getLogger(__name__).warning(f"Domain cache invalidate error: {e}")
     
     def cleanup_expired(self) -> int:
         """Clean up expired entries and return count of removed entries"""
@@ -345,16 +367,23 @@ class DomainCache:
         try:
             with self._lock:
                 current_time = time.time()
-                expired_keys = [
-                    key for key, cached in self._cache.items()
-                    if (current_time - cached.timestamp) >= self.ttl_seconds
-                ]
+                # Create a list of expired keys to avoid modifying dict during iteration
+                expired_keys = []
+                for key, cached in list(self._cache.items()):  # Use list() to avoid runtime error
+                    if (current_time - cached.timestamp) >= self.ttl_seconds:
+                        expired_keys.append(key)
+                
+                # Remove expired entries
                 for key in expired_keys:
-                    del self._cache[key]
+                    self._cache.pop(key, None)
+                    if key in self._access_order:
+                        self._access_order.remove(key)
                     removed_count += 1
+                    
         except Exception as e:
             self._stats['errors'] += 1
-            print(f"Domain cache cleanup error: {e}")
+            import logging
+            logging.getLogger(__name__).warning(f"Domain cache cleanup error: {e}")
         
         return removed_count
     
@@ -838,7 +867,7 @@ def invalidate_domain_cache(account=None):
         _domain_cache.invalidate(account)
         return True
     except Exception as e:
-        print(f"Failed to invalidate domain cache: {e}")
+        import logging; logging.getLogger(__name__).warning(f"Failed to invalidate domain cache: {e}")
         return False
 
 
@@ -882,7 +911,8 @@ def clear_disk_cache():
         _disk_cache.clear()
         return True
     except Exception as e:
-        print(f"Failed to clear disk cache: {e}")
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to clear disk cache: {e}")
         return False
 
 
@@ -905,7 +935,8 @@ def clear_function_cache(function_name):
             return deleted_count
         return True
     except Exception as e:
-        print(f"Failed to clear function cache for {function_name}: {e}")
+        import logging
+        logging.getLogger(__name__).warning(f"Failed to clear function cache for {function_name}: {e}")
         return False
 
 

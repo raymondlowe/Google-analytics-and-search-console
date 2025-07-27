@@ -79,7 +79,8 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
                     cached_result = _ga4_cache.get(cache_key)
                 except Exception as e:
                     # Cache read failed - log and continue without cache
-                    print(f"Cache read failed for {func.__name__}: {e}")
+                    import logging
+                    logging.getLogger(__name__).warning(f"Cache read failed for {func.__name__}: {e}")
                     cached_result = None
             
             if cached_result is not None:
@@ -94,7 +95,8 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
                     _ga4_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
                 except Exception as e:
                     # Cache write failed - log but don't fail the function
-                    print(f"Cache write failed for {func.__name__}: {e}")
+                    import logging
+                    logging.getLogger(__name__).warning(f"Cache write failed for {func.__name__}: {e}")
             
             return result
         
@@ -123,7 +125,8 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
                 _ga4_cache.evict(func.__name__)
                 return True
             except Exception as e:
-                print(f"Cache clear failed for {func.__name__}: {e}")
+                import logging
+                logging.getLogger(__name__).warning(f"Cache clear failed for {func.__name__}: {e}")
                 return False
         
         def cache_validate():

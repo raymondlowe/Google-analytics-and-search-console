@@ -1005,8 +1005,9 @@ async def get_server_stats(include_details: bool = False) -> dict:
                 'auth_failure_rate': (tracker_stats.get('auth_failures', 0) / 
                                      max(tracker_stats.get('total_requests', 1), 1)) * 100,
                 'avg_response_time_ms': tracker_stats.get('avg_response_time', 0) * 1000,
-                'cache_hit_rate': (domain_cache_stats.get('valid_entries', 0) / 
-                                 max(domain_cache_stats.get('total_entries', 1), 1)) * 100,
+                'cache_hit_rate': (domain_cache_stats.get('stats', {}).get('hits', 0) / 
+                                 max(domain_cache_stats.get('stats', {}).get('hits', 0) + 
+                                     domain_cache_stats.get('stats', {}).get('misses', 0), 1)) * 100,
                 'overall_cache_healthy': cache_health.get('overall_healthy', False)
             }
         
