@@ -134,7 +134,10 @@ def secure_compare(a: str, b: str) -> bool:
     # Use hmac.compare_digest directly for constant-time comparison
     return hmac.compare_digest(a.encode(), b.encode())
 
+# Configure FastMCP with stateless HTTP mode to avoid session ID issues
 mcp = FastMCP("ga4-gsc-mcp")
+# Set stateless HTTP mode to avoid session initialization issues
+mcp.settings.stateless_http = True
 
 # Helper functions
 def validate_date_range(start_date: str, end_date: str) -> bool:
