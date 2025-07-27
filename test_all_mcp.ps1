@@ -40,9 +40,8 @@ $errLog = Join-Path $PSScriptRoot 'mcp_server.err.log'
 foreach ($f in @($outLog, $errLog)) {
     if (Test-Path $f) { Remove-Item $f }
 }
-# Start HTTP MCP server and redirect logs
+# Start HTTP MCP server in background and redirect logs
 $serverProc = Start-Process uv -ArgumentList 'run mcp_server.py --http --host 127.0.0.1 --port 8000' -RedirectStandardOutput $outLog -RedirectStandardError $errLog -WorkingDirectory $PSScriptRoot -NoNewWindow -PassThru
-
 # Wait for server startup
 Start-Sleep -Seconds 5
 
