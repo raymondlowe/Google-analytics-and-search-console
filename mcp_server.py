@@ -971,6 +971,9 @@ async def get_server_stats(include_details: bool = False) -> dict:
         # Get disk cache stats for comprehensive monitoring  
         disk_cache_stats = NewDownloads.get_disk_cache_stats()
         
+        # Get comprehensive cache health validation
+        cache_health = NewDownloads.validate_cache_health()
+        
         # Get basic auth stats (since middleware might not be available in stdio mode)
         auth_stats = {
             'auth_stats': {},
@@ -985,6 +988,7 @@ async def get_server_stats(include_details: bool = False) -> dict:
             'request_metrics': tracker_stats,
             'domain_cache_metrics': domain_cache_stats,  # Memory-based domain cache
             'disk_cache_metrics': disk_cache_stats,      # Persistent disk cache
+            'cache_health': cache_health,                # Comprehensive cache health
             'authentication_metrics': auth_stats.get('auth_stats', {}),
             'rate_limiting': {
                 'unique_ips': auth_stats.get('unique_ips', 0),
@@ -1001,8 +1005,10 @@ async def get_server_stats(include_details: bool = False) -> dict:
                 'auth_failure_rate': (tracker_stats.get('auth_failures', 0) / 
                                      max(tracker_stats.get('total_requests', 1), 1)) * 100,
                 'avg_response_time_ms': tracker_stats.get('avg_response_time', 0) * 1000,
-                'cache_hit_rate': (domain_cache_stats.get('valid_entries', 0) / 
-                                 max(domain_cache_stats.get('total_entries', 1), 1)) * 100
+                'cache_hit_rate': (domain_cache_stats.get('stats', {}).get('hits', 0) / 
+                                 max(domain_cache_stats.get('stats', {}).get('hits', 0) + 
+                                     domain_cache_stats.get('stats', {}).get('misses', 0), 1)) * 100,
+                'overall_cache_healthy': cache_health.get('overall_healthy', False)
             }
         
         logger.info(f"Server stats retrieved - {tracker_stats.get('total_requests', 0)} total requests processed")
