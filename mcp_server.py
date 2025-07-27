@@ -367,7 +367,7 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
             if errors and df is not None and not df.empty:
                 duration = time.time() - start_time
                 logger.info(f"GA4 query completed with partial success - {len(df)} rows, {len(errors)} errors, {duration:.2f}s")
-                return {
+                return add_today_date_to_response({
                     "status": "partial_success",
                     "message": f"Retrieved {len(df)} rows of GA4 data with {len(errors)} property errors",
                     "date_range": {"start_date": start_date, "end_date": end_date},
@@ -376,14 +376,13 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
                     "source": "ga4",
                     "errors": errors,
                     "request_id": request_id,
-                    "duration_seconds": round(duration, 2),
-                    "todays_date": datetime.now().strftime('%Y-%m-%d')
-                }
+                    "duration_seconds": round(duration, 2)
+                })
             elif errors and (df is None or df.empty):
                 # All properties failed, return error with all details
                 error_msg = f"All properties failed: {'; '.join(errors)}"
                 logger.error(f"GA4 query failed completely - {error_msg}")
-                return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
+                return add_today_date_to_response({"status": "error", "message": error_msg, "request_id": request_id})
         
         if df is not None and not df.empty:
             duration = time.time() - start_time
@@ -396,10 +395,9 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
                 "row_count": len(df),
                 "source": "ga4",
                 "request_id": request_id,
-                "duration_seconds": round(duration, 2),
-                "todays_date": datetime.now().strftime('%Y-%m-%d')
+                "duration_seconds": round(duration, 2)
             }
-            return response
+            return add_today_date_to_response(response)
         else:
             duration = time.time() - start_time
             logger.info(f"GA4 query completed - no data found in {duration:.2f}s")

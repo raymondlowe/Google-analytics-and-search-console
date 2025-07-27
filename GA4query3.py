@@ -62,8 +62,9 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
                 cache_string = json.dumps(cache_data, sort_keys=True, default=str)
                 cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
             except (TypeError, ValueError) as e:
-                # Fallback to simpler key if serialization fails
-                cache_key = f"{func.__name__}:{abs(hash(str(args) + str(sorted(kwargs.items()))))}"
+                # Fallback to stable hashing for non-serializable args
+                fallback_string = str(args) + str(sorted(kwargs.items()))
+                cache_key = f"{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
             
             # Try to get from cache
             cached_result = _ga4_cache.get(cache_key)
@@ -72,7 +73,7 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
             
             # Cache miss - call function and cache result
             result = func(*args, **kwargs)
-            _ga4_cache.set(cache_key, result, expire=expire_time)
+            _ga4_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
             return result
         
         # Add cache management methods to the function
@@ -85,10 +86,8 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
             }
         
         def cache_clear():
-            """Clear cache for this function"""
-            keys_to_delete = [key for key in _ga4_cache if key.startswith(f"{func.__name__}:")]
-            for key in keys_to_delete:
-                del _ga4_cache[key]
+            """Clear cache for this function using efficient tag-based eviction"""
+            _ga4_cache.evict(func.__name__)
         
         wrapper.cache_info = cache_info
         wrapper.cache_clear = cache_clear

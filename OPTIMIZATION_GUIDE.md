@@ -131,7 +131,9 @@ Based on testing with simulated workloads:
 
 ### Default Settings
 
-- **Cache TTL**: 300 seconds (5 minutes)
+- **Domain Cache TTL**: 86400 seconds (24 hours - domain lists rarely change)
+- **Query Data Cache TTL**: 3600 seconds (1 hour - for data queries)
+- **Property Lists Cache TTL**: 604800 seconds (7 days - property lists are stable)
 - **Concurrency Limit**: 3 simultaneous requests per account
 - **API Wait Time**: 0 seconds (for testing; increase for production if needed)
 
