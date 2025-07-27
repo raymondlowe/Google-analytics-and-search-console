@@ -17,9 +17,9 @@ HEADERS = {
 def mcp_request(method, params=None, session=None):
     """
     Send a JSON-RPC request to the MCP server.
-    method: The tool or method name (e.g., 'get_server_stats')
-    params: Dictionary of parameters for the tool
-    session: Session ID if required
+    method: The method name (e.g., 'initialize', 'tools/call')
+    params: Dictionary of parameters for the method
+    session: Session ID if required (not used in stateless mode)
     Returns: Parsed JSON response or raw text
     """
     payload = {
@@ -28,10 +28,18 @@ def mcp_request(method, params=None, session=None):
         "method": method,
         "params": params or {}
     }
-    if session:
-        payload["session"] = session
+    # Note: session parameter not used in stateless mode
     resp = requests.post(BASE_URL, headers=HEADERS, data=json.dumps(payload))
     try:
+        # Handle SSE response format
+        response_text = resp.text
+        if response_text.startswith("event: message"):
+            # Extract JSON from SSE format
+            lines = response_text.split('\n')
+            for line in lines:
+                if line.startswith("data: "):
+                    json_data = line[6:]  # Remove "data: " prefix
+                    return json.loads(json_data)
         return resp.json()
     except Exception:
         return resp.text
@@ -42,37 +50,56 @@ def print_section(title):
     print("="*60)
 
 def main():
-    # Step 1: Initialize session
+    # Step 1: Initialize session with proper MCP protocol
     print_section("Initializing MCP session")
-    init_resp = mcp_request("session.initialize")
+    # Follow the MCP protocol for initialization
+    init_params = {
+        "protocolVersion": "2025-03-26",
+        "capabilities": {
+            "roots": {
+                "listChanged": True
+            },
+            "sampling": {}
+        },
+        "clientInfo": {
+            "name": "TestMCPClient",
+            "version": "1.0.0"
+        }
+    }
+    init_resp = mcp_request("initialize", params=init_params)
     print(json.dumps(init_resp, indent=2))
-    session_id = None
-    if "result" in init_resp and "session" in init_resp["result"]:
-        session_id = init_resp["result"]["session"]
-    else:
+    
+    # In stateless mode, we don't need to track session IDs
+    # But let's check if the response is successful
+    if "result" not in init_resp:
         print("Failed to initialize session, aborting.")
         return
+    
+    session_id = None  # Stateless mode doesn't use session IDs
 
     # Step 2: Test get_server_stats
     print_section("Testing get_server_stats tool")
-    stats_resp = mcp_request("get_server_stats", session=session_id)
+    stats_resp = mcp_request("tools/call", params={"name": "get_server_stats"}, session=session_id)
     print(json.dumps(stats_resp, indent=2))
 
     # Step 3: Test list_ga4_properties
     print_section("Testing list_ga4_properties tool")
-    ga4_resp = mcp_request("list_ga4_properties", session=session_id)
+    ga4_resp = mcp_request("tools/call", params={"name": "list_ga4_properties"}, session=session_id)
     print(json.dumps(ga4_resp, indent=2))
 
     # Step 4: Test list_gsc_domains
     print_section("Testing list_gsc_domains tool")
-    gsc_resp = mcp_request("list_gsc_domains", session=session_id)
+    gsc_resp = mcp_request("tools/call", params={"name": "list_gsc_domains"}, session=session_id)
     print(json.dumps(gsc_resp, indent=2))
 
     # Step 5: Test validate_ga4_parameters with sample input
     print_section("Testing validate_ga4_parameters tool")
     validate_resp = mcp_request(
-        "validate_ga4_parameters",
-        params={"dimensions": "pagePath", "metrics": "screenPageViews"},
+        "tools/call",
+        params={
+            "name": "validate_ga4_parameters",
+            "arguments": {"dimensions": "pagePath", "metrics": "screenPageViews"}
+        },
         session=session_id
     )
     print(json.dumps(validate_resp, indent=2))
@@ -81,10 +108,13 @@ def main():
     print_section("Testing query_ga4_data tool (with minimal required args)")
     today = time.strftime("%Y-%m-%d")
     query_resp = mcp_request(
-        "query_ga4_data",
+        "tools/call",
         params={
-            "start_date": today,
-            "end_date": today
+            "name": "query_ga4_data",
+            "arguments": {
+                "start_date": today,
+                "end_date": today
+            }
         },
         session=session_id
     )
