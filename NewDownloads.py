@@ -283,7 +283,7 @@ def async_persistent_cache(expire_time=86400, typed=False):
 class DomainCache:
     """Thread-safe cache for GSC domain lists to optimize performance with improved reliability"""
     
-    def __init__(self, ttl_seconds: int = 86400, max_entries: int = 100):  # 24 hour default TTL (domain lists rarely change)
+    def __init__(self, ttl_seconds: int = 86400, max_entries: int = 1000):  # 24 hour default TTL (domain lists rarely change)
         self.ttl_seconds = ttl_seconds
         self.max_entries = max_entries  # Prevent memory bloat
         self._cache: Dict[str, CachedDomainList] = {}
@@ -426,7 +426,7 @@ def get_current_date():
 
 
 @persistent_cache(expire_time=86400*7)  # Cache for 7 days since domain lists rarely change
-def list_search_console_sites(google_account="", debug=False, use_cache=True):
+def list_search_console_sites(google_account="", debug=False, use_cache=True, extra_auth_flags=None):
     """
     List all available Google Search Console sites/domains for the authenticated account.
     
@@ -472,7 +472,7 @@ def list_search_console_sites(google_account="", debug=False, use_cache=True):
         
         try:
             # Authenticate and construct service
-            service = get_service('webmasters', 'v3', scope, 'client_secrets.json', this_google_account)
+            service = get_service('webmasters', 'v3', scope, 'client_secrets.json', this_google_account, extra_auth_flags)
             profiles = service.sites().list().execute()
             
             if 'siteEntry' not in profiles:
@@ -540,7 +540,8 @@ async def fetch_search_console_data_async(
     debug=False,
     domain_filter=None,
     max_retries=3,
-    retry_delay=5
+    retry_delay=5,
+    extra_auth_flags=None
 ):
     """
     Async version of fetch_search_console_data with performance optimizations.
@@ -571,7 +572,7 @@ async def fetch_search_console_data_async(
         print(f"Domain cache stats: {cache_stats}")
     
     # Get cached domain list instead of making API calls every time
-    sites_df = await asyncio.to_thread(list_search_console_sites, google_account, debug, True)
+    sites_df = await asyncio.to_thread(list_search_console_sites, google_account, debug, True, extra_auth_flags)
     
     if sites_df is None or sites_df.empty:
         if debug:
@@ -622,7 +623,7 @@ async def fetch_search_console_data_async(
         task = _process_account_sites_async(
             account, account_sites, start_date, end_date, search_type, 
             dimensions_array, multi_dimension, wait_seconds, debug, 
-            max_retries, retry_delay
+            max_retries, retry_delay, extra_auth_flags
         )
         account_tasks.append(task)
     
@@ -650,7 +651,7 @@ async def fetch_search_console_data_async(
 async def _process_account_sites_async(
     account, account_sites, start_date, end_date, search_type, 
     dimensions_array, multi_dimension, wait_seconds, debug, 
-    max_retries, retry_delay
+    max_retries, retry_delay, extra_auth_flags=None
 ):
     """Process all sites for a single account concurrently"""
     
@@ -659,7 +660,7 @@ async def _process_account_sites_async(
     try:
         # Get service in thread to avoid blocking
         service = await asyncio.to_thread(
-            get_service, 'webmasters', 'v3', scope, 'client_secrets.json', account
+            get_service, 'webmasters', 'v3', scope, 'client_secrets.json', account, extra_auth_flags
         )
         
         # Process sites concurrently (but limit concurrency to avoid quota issues)
@@ -795,7 +796,8 @@ def fetch_search_console_data(
     debug=False,
     domain_filter=None,
     max_retries=3,
-    retry_delay=5
+    retry_delay=5,
+    extra_auth_flags=None
 ):
     """
     Synchronous wrapper for the async fetch_search_console_data_async function.
@@ -817,7 +819,7 @@ def fetch_search_console_data(
         def run_async_in_thread():
             return asyncio.run(fetch_search_console_data_async(
                 start_date, end_date, search_type, dimensions, google_account,
-                wait_seconds, debug, domain_filter, max_retries, retry_delay
+                wait_seconds, debug, domain_filter, max_retries, retry_delay, extra_auth_flags
             ))
         
         # Run in a separate thread to avoid blocking the main event loop
@@ -829,7 +831,7 @@ def fetch_search_console_data(
         # No event loop running, we can use asyncio.run() directly
         return asyncio.run(fetch_search_console_data_async(
             start_date, end_date, search_type, dimensions, google_account,
-            wait_seconds, debug, domain_filter, max_retries, retry_delay
+            wait_seconds, debug, domain_filter, max_retries, retry_delay, extra_auth_flags
         ))
 
 
@@ -1018,7 +1020,10 @@ def save_search_console_data(data_df, start_date, end_date, dimensions, name, se
 
 # CLI functionality - only runs when script is executed directly
 if __name__ == "__main__":
+
     parser = argparse.ArgumentParser()
+    # Accept --noauth_local_webserver as a passthrough for Google OAuth
+    parser.add_argument('--noauth_local_webserver', action='store_true', help='Use Google OAuth with manual code copy/paste (for remote/no browser)')
 
     #when doing argument parsing in command terminal put python before file name. No idea why, so just do it.
 
@@ -1038,12 +1043,16 @@ if __name__ == "__main__":
     parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts for failed API calls; default 3")
     parser.add_argument("--retry-delay", type=int, default=5, help="Base delay in seconds for retry attempts (uses exponential backoff); default 5")
 
+
     args = parser.parse_args()
+
+    # Pass this flag to googleAPIget_service if set
+    extra_auth_flags = {'noauth_local_webserver': args.noauth_local_webserver}
 
     # Handle list domains command
     if args.list_domains:
         print("Listing available Google Search Console domains...")
-        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True)
+        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True, extra_auth_flags=extra_auth_flags)
         if sites_df is not None and len(sites_df) > 0:
             print("\nAvailable domains:")
             print(sites_df.to_string(index=False))
@@ -1077,7 +1086,8 @@ if __name__ == "__main__":
         debug=True,
         domain_filter=domain_filter,
         max_retries=args.max_retries,
-        retry_delay=args.retry_delay
+        retry_delay=args.retry_delay,
+        extra_auth_flags=extra_auth_flags
     )
     
     # Save the data if we got any

@@ -7,7 +7,7 @@ from oauth2client import tools
 from oauth2client import client
 
 
-def get_service(api_name, api_version, scope, client_secrets_path, usernameToken = ""):
+def get_service(api_name, api_version, scope, client_secrets_path, usernameToken = "", extra_auth_flags=None):
   """Get a service that communicates to a Google API.
 
   Args:
@@ -21,10 +21,14 @@ def get_service(api_name, api_version, scope, client_secrets_path, usernameToken
     A service that is connected to the specified API.
   """
   # Parse command-line arguments.
+
   parser = argparse.ArgumentParser(
       formatter_class=argparse.RawDescriptionHelpFormatter,
       parents=[tools.argparser])
+  # Always parse empty list, then set flag manually if needed
   flags = parser.parse_args([])
+  if extra_auth_flags and extra_auth_flags.get('noauth_local_webserver'):
+      setattr(flags, 'noauth_local_webserver', True)
 
   import os
   if usernameToken == "":
