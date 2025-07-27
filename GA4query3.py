@@ -2,6 +2,7 @@ import os
 import sys
 import hashlib
 import json
+import time
 from datetime import datetime
 from functools import wraps
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -27,7 +28,7 @@ _ga4_cache = dc.Cache(_cache_dir, size_limit=500 * 1024 * 1024)  # 500MB limit
 
 def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA4 properties
     """
-    Disk-based cache decorator with configurable expiration time.
+    Disk-based cache decorator with configurable expiration time and robust error handling.
     
     Args:
         expire_time (int): Cache expiration time in seconds (default: 7 days)
@@ -40,6 +41,7 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Create stable cache key using SHA-256 instead of built-in hash
+            cache_key = None
             try:
                 # Serialize arguments to JSON for stable hashing
                 args_serializable = []
@@ -60,37 +62,86 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
                 
                 # Create SHA-256 hash of serialized data
                 cache_string = json.dumps(cache_data, sort_keys=True, default=str)
-                cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
-            except (TypeError, ValueError) as e:
+                cache_key = f"ga4_{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
+            except (TypeError, ValueError, UnicodeDecodeError) as e:
                 # Fallback to stable hashing for non-serializable args
-                fallback_string = str(args) + str(sorted(kwargs.items()))
-                cache_key = f"{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+                try:
+                    fallback_string = str(args) + str(sorted(kwargs.items()))
+                    cache_key = f"ga4_{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+                except Exception:
+                    # If all cache key generation fails, skip caching
+                    cache_key = None
             
-            # Try to get from cache
-            cached_result = _ga4_cache.get(cache_key)
+            # Try to get from cache with error handling
+            cached_result = None
+            if cache_key:
+                try:
+                    cached_result = _ga4_cache.get(cache_key)
+                except Exception as e:
+                    # Cache read failed - log and continue without cache
+                    print(f"Cache read failed for {func.__name__}: {e}")
+                    cached_result = None
+            
             if cached_result is not None:
                 return cached_result
             
-            # Cache miss - call function and cache result
+            # Cache miss or cache error - call function
             result = func(*args, **kwargs)
-            _ga4_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+            
+            # Try to cache result with error handling
+            if cache_key and result is not None:
+                try:
+                    _ga4_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+                except Exception as e:
+                    # Cache write failed - log but don't fail the function
+                    print(f"Cache write failed for {func.__name__}: {e}")
+            
             return result
         
         # Add cache management methods to the function
         def cache_info():
-            """Get cache statistics"""
-            return {
-                'cache_size': len(_ga4_cache),
-                'cache_directory': _cache_dir,
-                'function': func.__name__
-            }
+            """Get cache statistics with error handling"""
+            try:
+                return {
+                    'cache_size': len(_ga4_cache),
+                    'cache_directory': _cache_dir,
+                    'function': func.__name__,
+                    'cache_healthy': True
+                }
+            except Exception as e:
+                return {
+                    'cache_size': 0,
+                    'cache_directory': _cache_dir,
+                    'function': func.__name__,
+                    'cache_healthy': False,
+                    'error': str(e)
+                }
         
         def cache_clear():
-            """Clear cache for this function using efficient tag-based eviction"""
-            _ga4_cache.evict(func.__name__)
+            """Clear cache for this function using efficient tag-based eviction with error handling"""
+            try:
+                _ga4_cache.evict(func.__name__)
+                return True
+            except Exception as e:
+                print(f"Cache clear failed for {func.__name__}: {e}")
+                return False
+        
+        def cache_validate():
+            """Validate cache integrity"""
+            try:
+                # Test basic cache operations
+                test_key = f"ga4_{func.__name__}:health_check"
+                test_value = {"timestamp": time.time(), "test": True}
+                _ga4_cache.set(test_key, test_value, expire=60)
+                retrieved = _ga4_cache.get(test_key)
+                _ga4_cache.delete(test_key)
+                return retrieved is not None
+            except Exception:
+                return False
         
         wrapper.cache_info = cache_info
         wrapper.cache_clear = cache_clear
+        wrapper.cache_validate = cache_validate
         return wrapper
     return decorator
 

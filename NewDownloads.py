@@ -3,6 +3,8 @@ import datetime
 import time
 import asyncio
 import threading
+import hashlib
+import json
 from dataclasses import dataclass
 from typing import Dict, List, Optional, Union
 from functools import wraps
@@ -38,7 +40,7 @@ _disk_cache = dc.Cache(_cache_dir, size_limit=500 * 1024 * 1024)  # 500MB limit
 
 def persistent_cache(expire_time=86400, typed=False):
     """
-    Disk-based cache decorator with configurable expiration time.
+    Disk-based cache decorator with configurable expiration time and robust error handling.
     
     Args:
         expire_time (int): Cache expiration time in seconds (default: 24 hours)
@@ -51,9 +53,7 @@ def persistent_cache(expire_time=86400, typed=False):
         @wraps(func)
         def wrapper(*args, **kwargs):
             # Create stable cache key using SHA-256 for persistence
-            import hashlib
-            import json
-            
+            cache_key = None
             try:
                 # Serialize arguments to JSON for stable hashing
                 args_serializable = []
@@ -74,43 +74,92 @@ def persistent_cache(expire_time=86400, typed=False):
                 
                 # Create SHA-256 hash of serialized data
                 cache_string = json.dumps(cache_data, sort_keys=True, default=str)
-                cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
-            except (TypeError, ValueError):
+                cache_key = f"gsc_{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
+            except (TypeError, ValueError, UnicodeDecodeError):
                 # Fallback to stable hashing for non-serializable args
-                fallback_string = str(args) + str(sorted(kwargs.items()))
-                cache_key = f"{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+                try:
+                    fallback_string = str(args) + str(sorted(kwargs.items()))
+                    cache_key = f"gsc_{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+                except Exception:
+                    # If all cache key generation fails, skip caching
+                    cache_key = None
             
-            # Try to get from cache
-            cached_result = _disk_cache.get(cache_key)
+            # Try to get from cache with error handling
+            cached_result = None
+            if cache_key:
+                try:
+                    cached_result = _disk_cache.get(cache_key)
+                except Exception as e:
+                    # Cache read failed - log and continue without cache
+                    print(f"GSC cache read failed for {func.__name__}: {e}")
+                    cached_result = None
+            
             if cached_result is not None:
                 return cached_result
             
-            # Cache miss - call function and cache result
+            # Cache miss or cache error - call function
             result = func(*args, **kwargs)
-            _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+            
+            # Try to cache result with error handling
+            if cache_key and result is not None:
+                try:
+                    _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+                except Exception as e:
+                    # Cache write failed - log but don't fail the function
+                    print(f"GSC cache write failed for {func.__name__}: {e}")
+            
             return result
         
         # Add cache management methods to the function
         def cache_info():
-            """Get cache statistics"""
-            return {
-                'cache_size': len(_disk_cache),
-                'cache_directory': _cache_dir,
-                'function': func.__name__
-            }
+            """Get cache statistics with error handling"""
+            try:
+                return {
+                    'cache_size': len(_disk_cache),
+                    'cache_directory': _cache_dir,
+                    'function': func.__name__,
+                    'cache_healthy': True
+                }
+            except Exception as e:
+                return {
+                    'cache_size': 0,
+                    'cache_directory': _cache_dir,
+                    'function': func.__name__,
+                    'cache_healthy': False,
+                    'error': str(e)
+                }
         
         def cache_clear():
-            """Clear cache for this function using efficient tag-based eviction"""
-            _disk_cache.evict(func.__name__)
+            """Clear cache for this function using efficient tag-based eviction with error handling"""
+            try:
+                _disk_cache.evict(func.__name__)
+                return True
+            except Exception as e:
+                print(f"GSC cache clear failed for {func.__name__}: {e}")
+                return False
+        
+        def cache_validate():
+            """Validate cache integrity"""
+            try:
+                # Test basic cache operations
+                test_key = f"gsc_{func.__name__}:health_check"
+                test_value = {"timestamp": time.time(), "test": True}
+                _disk_cache.set(test_key, test_value, expire=60)
+                retrieved = _disk_cache.get(test_key)
+                _disk_cache.delete(test_key)
+                return retrieved is not None
+            except Exception:
+                return False
         
         wrapper.cache_info = cache_info
         wrapper.cache_clear = cache_clear
+        wrapper.cache_validate = cache_validate
         return wrapper
     return decorator
 
 def async_persistent_cache(expire_time=86400, typed=False):
     """
-    Async version of persistent_cache decorator.
+    Async version of persistent_cache decorator with robust error handling.
     
     Args:
         expire_time (int): Cache expiration time in seconds (default: 24 hours)
@@ -123,9 +172,7 @@ def async_persistent_cache(expire_time=86400, typed=False):
         @wraps(func)
         async def wrapper(*args, **kwargs):
             # Create stable cache key using SHA-256 for persistence
-            import hashlib
-            import json
-            
+            cache_key = None
             try:
                 # Serialize arguments to JSON for stable hashing
                 args_serializable = []
@@ -146,86 +193,199 @@ def async_persistent_cache(expire_time=86400, typed=False):
                 
                 # Create SHA-256 hash of serialized data
                 cache_string = json.dumps(cache_data, sort_keys=True, default=str)
-                cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
-            except (TypeError, ValueError):
+                cache_key = f"gsc_async_{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
+            except (TypeError, ValueError, UnicodeDecodeError):
                 # Fallback to stable hashing for non-serializable args
-                fallback_string = str(args) + str(sorted(kwargs.items()))
-                cache_key = f"{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+                try:
+                    fallback_string = str(args) + str(sorted(kwargs.items()))
+                    cache_key = f"gsc_async_{func.__name__}:{hashlib.sha256(fallback_string.encode()).hexdigest()}"
+                except Exception:
+                    # If all cache key generation fails, skip caching
+                    cache_key = None
             
-            # Try to get from cache
-            cached_result = _disk_cache.get(cache_key)
+            # Try to get from cache with error handling
+            cached_result = None
+            if cache_key:
+                try:
+                    cached_result = _disk_cache.get(cache_key)
+                except Exception as e:
+                    # Cache read failed - log and continue without cache
+                    print(f"GSC async cache read failed for {func.__name__}: {e}")
+                    cached_result = None
+            
             if cached_result is not None:
                 return cached_result
             
-            # Cache miss - call function and cache result
+            # Cache miss or cache error - call function
             result = await func(*args, **kwargs)
-            _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+            
+            # Try to cache result with error handling
+            if cache_key and result is not None:
+                try:
+                    _disk_cache.set(cache_key, result, expire=expire_time, tag=func.__name__)
+                except Exception as e:
+                    # Cache write failed - log but don't fail the function
+                    print(f"GSC async cache write failed for {func.__name__}: {e}")
+            
             return result
         
         # Add cache management methods to the function
         def cache_info():
-            """Get cache statistics"""
-            return {
-                'cache_size': len(_disk_cache),
-                'cache_directory': _cache_dir,
-                'function': func.__name__
-            }
+            """Get cache statistics with error handling"""
+            try:
+                return {
+                    'cache_size': len(_disk_cache),
+                    'cache_directory': _cache_dir,
+                    'function': func.__name__,
+                    'cache_healthy': True
+                }
+            except Exception as e:
+                return {
+                    'cache_size': 0,
+                    'cache_directory': _cache_dir,
+                    'function': func.__name__,
+                    'cache_healthy': False,
+                    'error': str(e)
+                }
         
         def cache_clear():
-            """Clear cache for this function using efficient tag-based eviction"""
-            _disk_cache.evict(func.__name__)
+            """Clear cache for this function using efficient tag-based eviction with error handling"""
+            try:
+                _disk_cache.evict(func.__name__)
+                return True
+            except Exception as e:
+                print(f"GSC cache clear failed for {func.__name__}: {e}")
+                return False
+        
+        def cache_validate():
+            """Validate cache integrity"""
+            try:
+                # Test basic cache operations
+                test_key = f"gsc_{func.__name__}:health_check"
+                test_value = {"timestamp": time.time(), "test": True}
+                _disk_cache.set(test_key, test_value, expire=60)
+                retrieved = _disk_cache.get(test_key)
+                _disk_cache.delete(test_key)
+                return retrieved is not None
+            except Exception:
+                return False
         
         wrapper.cache_info = cache_info
         wrapper.cache_clear = cache_clear
+        wrapper.cache_validate = cache_validate
         return wrapper
     return decorator
 
 class DomainCache:
-    """Thread-safe cache for GSC domain lists to optimize performance"""
+    """Thread-safe cache for GSC domain lists to optimize performance with improved reliability"""
     
-    def __init__(self, ttl_seconds: int = 86400):  # 24 hour default TTL (domain lists rarely change)
+    def __init__(self, ttl_seconds: int = 86400, max_entries: int = 100):  # 24 hour default TTL (domain lists rarely change)
         self.ttl_seconds = ttl_seconds
+        self.max_entries = max_entries  # Prevent memory bloat
         self._cache: Dict[str, CachedDomainList] = {}
         self._lock = threading.Lock()
+        self._stats = {
+            'hits': 0,
+            'misses': 0,
+            'errors': 0,
+            'evictions': 0
+        }
     
     def get(self, account: str) -> Optional[List[Dict]]:
-        """Get cached domain list if still valid"""
-        with self._lock:
-            cached = self._cache.get(account)
-            if cached and (time.time() - cached.timestamp) < self.ttl_seconds:
-                return cached.domains
+        """Get cached domain list if still valid with error handling"""
+        try:
+            with self._lock:
+                cached = self._cache.get(account)
+                if cached and (time.time() - cached.timestamp) < self.ttl_seconds:
+                    self._stats['hits'] += 1
+                    return cached.domains
+                self._stats['misses'] += 1
+                return None
+        except Exception as e:
+            self._stats['errors'] += 1
+            print(f"Domain cache get error for account {account}: {e}")
             return None
     
     def set(self, account: str, domains: List[Dict]) -> None:
-        """Cache domain list with current timestamp"""
-        with self._lock:
-            self._cache[account] = CachedDomainList(
-                domains=domains,
-                timestamp=time.time(),
-                account=account
-            )
+        """Cache domain list with current timestamp and size management"""
+        try:
+            with self._lock:
+                # Implement LRU eviction if cache is full
+                if len(self._cache) >= self.max_entries:
+                    # Remove oldest entry
+                    oldest_key = min(self._cache.keys(), 
+                                   key=lambda k: self._cache[k].timestamp)
+                    del self._cache[oldest_key]
+                    self._stats['evictions'] += 1
+                
+                self._cache[account] = CachedDomainList(
+                    domains=domains,
+                    timestamp=time.time(),
+                    account=account
+                )
+        except Exception as e:
+            self._stats['errors'] += 1
+            print(f"Domain cache set error for account {account}: {e}")
     
     def invalidate(self, account: str = None) -> None:
-        """Invalidate cache for specific account or all accounts"""
-        with self._lock:
-            if account:
-                self._cache.pop(account, None)
-            else:
-                self._cache.clear()
+        """Invalidate cache for specific account or all accounts with error handling"""
+        try:
+            with self._lock:
+                if account:
+                    self._cache.pop(account, None)
+                else:
+                    self._cache.clear()
+        except Exception as e:
+            self._stats['errors'] += 1
+            print(f"Domain cache invalidate error: {e}")
+    
+    def cleanup_expired(self) -> int:
+        """Clean up expired entries and return count of removed entries"""
+        removed_count = 0
+        try:
+            with self._lock:
+                current_time = time.time()
+                expired_keys = [
+                    key for key, cached in self._cache.items()
+                    if (current_time - cached.timestamp) >= self.ttl_seconds
+                ]
+                for key in expired_keys:
+                    del self._cache[key]
+                    removed_count += 1
+        except Exception as e:
+            self._stats['errors'] += 1
+            print(f"Domain cache cleanup error: {e}")
+        
+        return removed_count
     
     def get_stats(self) -> Dict:
-        """Get cache statistics for monitoring"""
-        with self._lock:
-            current_time = time.time()
-            valid_entries = sum(
-                1 for cached in self._cache.values()
-                if (current_time - cached.timestamp) < self.ttl_seconds
-            )
+        """Get cache statistics for monitoring with health information"""
+        try:
+            with self._lock:
+                current_time = time.time()
+                valid_entries = sum(
+                    1 for cached in self._cache.values()
+                    if (current_time - cached.timestamp) < self.ttl_seconds
+                )
+                return {
+                    'total_entries': len(self._cache),
+                    'valid_entries': valid_entries,
+                    'expired_entries': len(self._cache) - valid_entries,
+                    'ttl_seconds': self.ttl_seconds,
+                    'max_entries': self.max_entries,
+                    'hit_rate': self._stats['hits'] / max(self._stats['hits'] + self._stats['misses'], 1),
+                    'stats': self._stats.copy(),
+                    'cache_healthy': self._stats['errors'] < 10  # Simple health check
+                }
+        except Exception as e:
             return {
-                'total_entries': len(self._cache),
-                'valid_entries': valid_entries,
-                'expired_entries': len(self._cache) - valid_entries,
-                'ttl_seconds': self.ttl_seconds
+                'total_entries': 0,
+                'valid_entries': 0,
+                'expired_entries': 0,
+                'ttl_seconds': self.ttl_seconds,
+                'max_entries': self.max_entries,
+                'cache_healthy': False,
+                'error': str(e)
             }
 
 # Global domain cache instance
@@ -646,42 +806,148 @@ def fetch_search_console_data(
 
 # Add cache management functions
 def get_domain_cache_stats():
-    """Get domain cache statistics for monitoring"""
-    domain_stats = _domain_cache.get_stats()
-    disk_stats = {
-        'disk_cache_size': len(_disk_cache),
-        'disk_cache_directory': _cache_dir,
-        'disk_cache_volume_info': _disk_cache.volume()
-    }
-    return {**domain_stats, **disk_stats}
+    """Get domain cache statistics for monitoring with comprehensive health info"""
+    try:
+        domain_stats = _domain_cache.get_stats()
+        disk_stats = {
+            'disk_cache_size': len(_disk_cache),
+            'disk_cache_directory': _cache_dir,
+            'disk_cache_volume_info': _disk_cache.volume(),
+            'disk_cache_healthy': True
+        }
+        
+        # Cleanup expired domain cache entries periodically
+        if domain_stats.get('expired_entries', 0) > 0:
+            removed = _domain_cache.cleanup_expired()
+            domain_stats['cleaned_up_entries'] = removed
+        
+        return {**domain_stats, **disk_stats}
+    except Exception as e:
+        return {
+            'error': str(e),
+            'domain_cache_healthy': False,
+            'disk_cache_healthy': False,
+            'disk_cache_size': 0,
+            'disk_cache_directory': _cache_dir
+        }
 
 
 def invalidate_domain_cache(account=None):
-    """Invalidate domain cache for specific account or all accounts"""
-    _domain_cache.invalidate(account)
+    """Invalidate domain cache for specific account or all accounts with error handling"""
+    try:
+        _domain_cache.invalidate(account)
+        return True
+    except Exception as e:
+        print(f"Failed to invalidate domain cache: {e}")
+        return False
 
 
 def get_disk_cache_stats():
-    """Get comprehensive disk cache statistics"""
-    return {
-        'size': len(_disk_cache),
-        'directory': _cache_dir,
-        'volume_info': _disk_cache.volume(),
-        'cache_info': _disk_cache.stats()
-    }
+    """Get comprehensive disk cache statistics with health information"""
+    try:
+        basic_stats = {
+            'size': len(_disk_cache),
+            'directory': _cache_dir,
+            'volume_info': _disk_cache.volume(),
+            'cache_info': _disk_cache.stats(),
+            'cache_healthy': True
+        }
+        
+        # Additional health checks
+        try:
+            # Test basic operations
+            test_key = "health_check_test"
+            test_value = {"test": True, "timestamp": time.time()}
+            _disk_cache.set(test_key, test_value, expire=60)
+            retrieved = _disk_cache.get(test_key)
+            _disk_cache.delete(test_key)
+            basic_stats['basic_operations_working'] = retrieved is not None
+        except Exception:
+            basic_stats['basic_operations_working'] = False
+            basic_stats['cache_healthy'] = False
+        
+        return basic_stats
+    except Exception as e:
+        return {
+            'size': 0,
+            'directory': _cache_dir,
+            'cache_healthy': False,
+            'error': str(e)
+        }
 
 
 def clear_disk_cache():
-    """Clear all disk cache entries"""
-    _disk_cache.clear()
+    """Clear all disk cache entries with error handling"""
+    try:
+        _disk_cache.clear()
+        return True
+    except Exception as e:
+        print(f"Failed to clear disk cache: {e}")
+        return False
 
 
 def clear_function_cache(function_name):
-    """Clear cache entries for a specific function"""
-    keys_to_delete = [key for key in _disk_cache if key.startswith(f"{function_name}:")]
-    for key in keys_to_delete:
-        del _disk_cache[key]
-    return len(keys_to_delete)
+    """Clear cache entries for a specific function with improved error handling"""
+    try:
+        # More efficient tag-based clearing if supported
+        if hasattr(_disk_cache, 'evict'):
+            _disk_cache.evict(function_name)
+        else:
+            # Fallback to manual deletion
+            keys_to_delete = [key for key in _disk_cache if key.startswith(f"gsc_{function_name}:")]
+            deleted_count = 0
+            for key in keys_to_delete:
+                try:
+                    del _disk_cache[key]
+                    deleted_count += 1
+                except Exception:
+                    pass  # Continue with other keys
+            return deleted_count
+        return True
+    except Exception as e:
+        print(f"Failed to clear function cache for {function_name}: {e}")
+        return False
+
+
+def validate_cache_health():
+    """Comprehensive cache health validation"""
+    health_report = {
+        'overall_healthy': True,
+        'domain_cache': {},
+        'disk_cache': {},
+        'issues': []
+    }
+    
+    try:
+        # Test domain cache
+        domain_stats = _domain_cache.get_stats()
+        health_report['domain_cache'] = domain_stats
+        if not domain_stats.get('cache_healthy', False):
+            health_report['overall_healthy'] = False
+            health_report['issues'].append("Domain cache health check failed")
+        
+        # Test disk cache
+        disk_stats = get_disk_cache_stats()
+        health_report['disk_cache'] = disk_stats
+        if not disk_stats.get('cache_healthy', False):
+            health_report['overall_healthy'] = False
+            health_report['issues'].append("Disk cache health check failed")
+        
+        # Check disk space
+        try:
+            volume_info = _disk_cache.volume()
+            if volume_info and 'percent' in volume_info:
+                if volume_info['percent'] > 90:  # More than 90% full
+                    health_report['issues'].append(f"Cache disk usage high: {volume_info['percent']}%")
+                    health_report['overall_healthy'] = False
+        except Exception:
+            health_report['issues'].append("Could not check disk space")
+        
+    except Exception as e:
+        health_report['overall_healthy'] = False
+        health_report['issues'].append(f"Cache health validation failed: {e}")
+    
+    return health_report
 
 
 def save_search_console_data(data_df, start_date, end_date, dimensions, name, search_type, google_account):
