@@ -983,9 +983,9 @@ def validate_cache_health():
     return health_report
 
 
-def save_search_console_data(data_df, start_date, end_date, dimensions, name, search_type, google_account):
+def save_search_console_data(data_df, start_date, end_date, dimensions, name, search_type, google_account, output_format="excel"):
     """
-    Save search console data to Excel file with options sheet.
+    Save search console data to Excel or CSV file with metadata.
     
     Args:
         data_df (pandas.DataFrame): The data to save
@@ -995,6 +995,7 @@ def save_search_console_data(data_df, start_date, end_date, dimensions, name, se
         name (str): Output filename base (without extension)
         search_type (str): Search type used in query
         google_account (str): Google account identifier used
+        output_format (str): Output format - "excel" or "csv" (default: "excel")
     """
     if len(data_df) == 0:
         print("No data to save")
@@ -1007,15 +1008,42 @@ def save_search_console_data(data_df, start_date, end_date, dimensions, name, se
     if google_account > "":
         name = google_account + "-" + name 
     
-    # Create options dataframe
-    options = [[start_date, end_date, dimensions, name, search_type, google_account]]
-    options_df = pd.DataFrame(options, columns=["start_date", "end_date", "dimensions", "name", "Data Type", "Google Account"])
+    # Create metadata
+    metadata_info = {
+        "start_date": start_date,
+        "end_date": end_date,
+        "dimensions": dimensions,
+        "name": name,
+        "search_type": search_type,
+        "google_account": google_account,
+        "generated_at": datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+        "total_rows": len(data_df)
+    }
     
-    # Save to Excel
-    with ExcelWriter(name + '.xlsx') as writer:
-        data_df.to_excel(writer, sheet_name='data')
-        options_df.to_excel(writer, sheet_name="Options")
-        print(f"Data saved to {name}.xlsx")
+    if output_format.lower() == "csv":
+        # Save main data as CSV
+        csv_filename = name + '.csv'
+        data_df.to_csv(csv_filename, index=False)
+        print(f"Data saved to {csv_filename}")
+        
+        # Save metadata as text file
+        metadata_filename = name + '_metadata.txt'
+        with open(metadata_filename, 'w', encoding='utf-8') as f:
+            for key, value in metadata_info.items():
+                f.write(f"{key}: {value}\n")
+        print(f"Metadata saved to {metadata_filename}")
+        
+    else:
+        # Default Excel format with options sheet
+        options = [[start_date, end_date, dimensions, name, search_type, google_account]]
+        options_df = pd.DataFrame(options, columns=["start_date", "end_date", "dimensions", "name", "Data Type", "Google Account"])
+        
+        # Save to Excel
+        excel_filename = name + '.xlsx'
+        with ExcelWriter(excel_filename) as writer:
+            data_df.to_excel(writer, sheet_name='data', index=False)
+            options_df.to_excel(writer, sheet_name="Options", index=False)
+        print(f"Data saved to {excel_filename}")
 
 
 # CLI functionality - only runs when script is executed directly
@@ -1042,6 +1070,7 @@ if __name__ == "__main__":
     parser.add_argument("--list-domains", action="store_true", help="List all available Search Console domains/sites and exit")
     parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts for failed API calls; default 3")
     parser.add_argument("--retry-delay", type=int, default=5, help="Base delay in seconds for retry attempts (uses exponential backoff); default 5")
+    parser.add_argument("-f", "--format", default="excel", choices=("excel", "csv"), help="Output format for the data; default is excel (.xlsx with metadata sheet), csv saves main data as .csv and metadata as .txt")
 
 
     args = parser.parse_args()
@@ -1099,8 +1128,12 @@ if __name__ == "__main__":
             dimensions=dimensionsstring,
             name=name,
             search_type=dataType,
-            google_account=googleaccountstring
+            google_account=googleaccountstring,
+            output_format=args.format
         )
-        print("finished and outputed to excel file")
+        if args.format.lower() == "csv":
+            print("finished and outputted to CSV and metadata files")
+        else:
+            print("finished and outputted to Excel file")
     else:
         print("nothing found")
