@@ -189,27 +189,6 @@ def get_current_date():
     """Get current date in YYYY-MM-DD format for AI clients"""
     return datetime.datetime.now().strftime('%Y-%m-%d')
 
-def get_disk_cache_stats() -> Dict:
-    """Get disk cache statistics for monitoring"""
-    return {
-        'cache_size': len(_disk_cache),
-        'cache_directory': _cache_dir,
-        'cache_size_mb': sum(os.path.getsize(os.path.join(_cache_dir, f)) 
-                           for f in os.listdir(_cache_dir) if os.path.isfile(os.path.join(_cache_dir, f))) / (1024 * 1024)
-    }
-
-def clear_disk_cache():
-    """Clear all disk cache entries"""
-    _disk_cache.clear()
-
-def invalidate_domain_cache(account: str = None) -> None:
-    """Invalidate domain cache for specific account or all accounts"""
-    _domain_cache.invalidate(account)
-
-def get_domain_cache_stats() -> Dict:
-    """Get domain cache statistics for monitoring"""
-    return _domain_cache.get_stats()
-
 
 @persistent_cache(expire_time=86400*7)  # Cache for 7 days since domain lists rarely change
 def list_search_console_sites(google_account="", debug=False, use_cache=True):

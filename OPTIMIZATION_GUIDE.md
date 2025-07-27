@@ -16,7 +16,7 @@ The original MCP server experienced timeout issues due to:
 
 ### 1. Domain List Caching
 
-- **Cache Duration**: 5-minute TTL (Time To Live)
+- **Cache Duration**: 24-hour TTL (Time To Live) - domain lists rarely change
 - **Thread-Safe**: Uses threading locks for concurrent access
 - **Per-Account**: Separate cache entries for different Google accounts
 - **Benefits**: Eliminates repeated domain list API calls

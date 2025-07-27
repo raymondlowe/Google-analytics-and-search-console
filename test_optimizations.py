@@ -6,6 +6,7 @@ Test script to verify the MCP server optimizations are working.
 import asyncio
 import time
 from unittest.mock import Mock, patch
+from urllib.parse import urlparse
 import pandas as pd
 import NewDownloads
 
@@ -46,7 +47,6 @@ def test_early_domain_filtering():
         if site_url.startswith('sc-domain:'):
             current_domain = site_url[10:].lower()
         else:
-            from urllib.parse import urlparse
             parsed = urlparse(site_url)
             current_domain = parsed.hostname.lower() if parsed.hostname else ''
         

@@ -1,5 +1,7 @@
 import os
 import sys
+import hashlib
+import json
 from datetime import datetime
 from functools import wraps
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -37,10 +39,31 @@ def persistent_cache(expire_time=86400*7, typed=False):  # 7 days default for GA
     def decorator(func):
         @wraps(func)
         def wrapper(*args, **kwargs):
-            # Create cache key from function name and arguments
-            cache_key = f"{func.__name__}:{hash((args, tuple(sorted(kwargs.items()))))}"
-            if typed:
-                cache_key += f":{hash(tuple(type(arg) for arg in args))}"
+            # Create stable cache key using SHA-256 instead of built-in hash
+            try:
+                # Serialize arguments to JSON for stable hashing
+                args_serializable = []
+                for arg in args:
+                    if hasattr(arg, '__dict__'):
+                        args_serializable.append(str(arg))
+                    else:
+                        args_serializable.append(arg)
+                
+                cache_data = {
+                    'function': func.__name__,
+                    'args': args_serializable,
+                    'kwargs': sorted(kwargs.items())
+                }
+                
+                if typed:
+                    cache_data['arg_types'] = [type(arg).__name__ for arg in args]
+                
+                # Create SHA-256 hash of serialized data
+                cache_string = json.dumps(cache_data, sort_keys=True, default=str)
+                cache_key = f"{func.__name__}:{hashlib.sha256(cache_string.encode()).hexdigest()}"
+            except (TypeError, ValueError) as e:
+                # Fallback to simpler key if serialization fails
+                cache_key = f"{func.__name__}:{abs(hash(str(args) + str(sorted(kwargs.items()))))}"
             
             # Try to get from cache
             cached_result = _ga4_cache.get(cache_key)

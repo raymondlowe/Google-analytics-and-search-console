@@ -275,12 +275,12 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     if not start_date or not end_date:
         error_msg = "start_date and end_date are required parameters"
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}")
-        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
+        return add_today_date_to_response({"status": "error", "message": error_msg, "request_id": request_id})
     
     if not validate_date_range(start_date, end_date):
         error_msg = "Invalid date range"
         logger.warning(f"[{request_id}] GA4 query failed - {error_msg}: {start_date} to {end_date}")
-        return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
+        return add_today_date_to_response({"status": "error", "message": error_msg, "request_id": request_id})
     
     # Validate dimensions and metrics before API call
     validation_result = validate_ga4_dimensions_metrics(dimensions, metrics)
@@ -1004,7 +1004,7 @@ async def get_server_stats(include_details: bool = False) -> dict:
                                      max(tracker_stats.get('total_requests', 1), 1)) * 100,
                 'avg_response_time_ms': tracker_stats.get('avg_response_time', 0) * 1000,
                 'cache_hit_rate': (domain_cache_stats.get('valid_entries', 0) / 
-                                 max(domain_cache_stats.get('total_entries', 1), 1)) * 100 if domain_cache_stats.get('total_entries', 0) > 0 else 0
+                                 max(domain_cache_stats.get('total_entries', 1), 1)) * 100
             }
         
         logger.info(f"Server stats retrieved - {tracker_stats.get('total_requests', 0)} total requests processed")
@@ -1122,33 +1122,6 @@ async def invalidate_cache(cache_type: str = "domain", account: str = "") -> dic
             'request_id': request_id,
             'todays_date': datetime.now().strftime('%Y-%m-%d')
         }
-    """
-    Analyze page-query combinations to find content optimization opportunities.
-    
-    Business Purpose: Identify specific page-keyword combinations where you can improve
-    rankings through content optimization. Perfect for finding quick SEO wins.
-    
-    This tool focuses on:
-    - Page-keyword pairs with good impressions but poor rankings
-    - Content that ranks on page 2-3 of Google (positions 11-30) with optimization potential
-    - Pages that could rank for additional related keywords
-    - Content gaps where competitors outrank you
-    
-    Returns data optimized for: Content optimization, on-page SEO, competitive analysis
-    
-    Args:
-        start_date: Start date in YYYY-MM-DD format (required)
-        end_date: End date in YYYY-MM-DD format (required)
-        domain: Filter by specific domain (optional)
-        debug: Enable debug output
-    """
-    if not start_date or not end_date:
-        return {"status": "error", "message": "start_date and end_date are required parameters"}
-    
-    # Use specific dimensions optimized for page-query opportunity analysis
-    dimensions = "page,query"
-    
-    return await query_gsc_data(start_date, end_date, auth_identifier, domain, dimensions, "web", debug)
 
 # Security middleware for HTTP mode with enhanced logging and rate limiting
 class BearerTokenMiddleware:
