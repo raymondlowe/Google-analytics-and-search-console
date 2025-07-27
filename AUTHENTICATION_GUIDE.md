@@ -111,7 +111,18 @@ The server middleware:
 
 ```bash
 # With a specific key
+
 uv run mcp_server.py --http --key your-secure-api-key
+
+# Example: Using the official MCP client
+
+To test your MCP server with the official client, use:
+
+```
+npx -y @raymondlowe/mcp-client --url http://127.0.0.1:8000/mcp --bearer your-secure-api-key --verbose
+```
+
+Replace `your-secure-api-key` with your actual API key. The correct flag is `--bearer` (not `--key`).
 
 # With auto-generated key
 uv run mcp_server.py --http
