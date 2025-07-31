@@ -515,51 +515,51 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
         logger.error(f"GSC query exception - {error_msg}, duration: {duration:.2f}s", exc_info=True)
         return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
 
-@mcp.tool()
-async def query_unified_data(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", ga4_property_id: str = "", data_sources: list = ["ga4", "gsc"], debug: bool = False) -> dict:
-    """
-    Query both GA4 and GSC data for comprehensive cross-platform analysis.
+# @mcp.tool()
+# async def query_unified_data(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", ga4_property_id: str = "", data_sources: list = ["ga4", "gsc"], debug: bool = False) -> dict:
+#     """
+#     Query both GA4 and GSC data for comprehensive cross-platform analysis.
     
-    Business Use Cases:
-    - Compare organic search performance (GSC) with actual user behavior (GA4)
-    - Identify pages with high search impressions but low GA4 pageviews (optimization opportunity)
-    - Cross-reference revenue data with search performance
-    - Comprehensive SEO and monetization analysis
+#     Business Use Cases:
+#     - Compare organic search performance (GSC) with actual user behavior (GA4)
+#     - Identify pages with high search impressions but low GA4 pageviews (optimization opportunity)
+#     - Cross-reference revenue data with search performance
+#     - Comprehensive SEO and monetization analysis
     
-    This tool combines data from both platforms to provide insights that neither platform 
-    alone can offer, ideal for holistic website performance analysis.
+#     This tool combines data from both platforms to provide insights that neither platform 
+#     alone can offer, ideal for holistic website performance analysis.
     
-    Args:
-        start_date: Start date in YYYY-MM-DD format (required)
-        end_date: End date in YYYY-MM-DD format (required)
-        domain: Domain to analyze (optional, analyzes all domains if not specified)
-        ga4_property_id: Specific GA4 property ID (optional)
-        data_sources: List of data sources to query - ["ga4"], ["gsc"], or ["ga4", "gsc"] (default: both)
-        debug: Enable debug output
-    """
-    if not start_date or not end_date:
-        return {"status": "error", "message": "start_date and end_date are required parameters", "todays_date": datetime.now().strftime('%Y-%m-%d')}
-    if not validate_date_range(start_date, end_date):
-        return {"status": "error", "message": "Invalid date range", "todays_date": datetime.now().strftime('%Y-%m-%d')}
-    results = []
-    errors = []
-    if "ga4" in data_sources:
-        ga4_result = await query_ga4_data(auth_identifier, start_date, end_date, ga4_property_id, domain, debug=debug)
-        if ga4_result.get("status") == "success":
-            results.append(ga4_result)
-        else:
-            errors.append(ga4_result.get("message"))
-    if "gsc" in data_sources:
-        gsc_result = await query_gsc_data(auth_identifier, start_date, end_date, domain, debug=debug)
-        if gsc_result.get("status") == "success":
-            results.append(gsc_result)
-        else:
-            errors.append(gsc_result.get("message"))
-    if not results and errors:
-        return {"status": "error", "message": "; ".join(errors), "todays_date": datetime.now().strftime('%Y-%m-%d')}
-    if errors:
-        return {"status": "partial_success", "message": f"Retrieved data from {len(results)} source(s) with {len(errors)} error(s)", "errors": errors, "results": results, "todays_date": datetime.now().strftime('%Y-%m-%d')}
-    return {"status": "success", "message": f"Retrieved data from {len(results)} source(s)", "results": results, "todays_date": datetime.now().strftime('%Y-%m-%d')}
+#     Args:
+#         start_date: Start date in YYYY-MM-DD format (required)
+#         end_date: End date in YYYY-MM-DD format (required)
+#         domain: Domain to analyze (optional, analyzes all domains if not specified)
+#         ga4_property_id: Specific GA4 property ID (optional)
+#         data_sources: List of data sources to query - ["ga4"], ["gsc"], or ["ga4", "gsc"] (default: both)
+#         debug: Enable debug output
+#     """
+#     if not start_date or not end_date:
+#         return {"status": "error", "message": "start_date and end_date are required parameters", "todays_date": datetime.now().strftime('%Y-%m-%d')}
+#     if not validate_date_range(start_date, end_date):
+#         return {"status": "error", "message": "Invalid date range", "todays_date": datetime.now().strftime('%Y-%m-%d')}
+#     results = []
+#     errors = []
+#     if "ga4" in data_sources:
+#         ga4_result = await query_ga4_data(auth_identifier, start_date, end_date, ga4_property_id, domain, debug=debug)
+#         if ga4_result.get("status") == "success":
+#             results.append(ga4_result)
+#         else:
+#             errors.append(ga4_result.get("message"))
+#     if "gsc" in data_sources:
+#         gsc_result = await query_gsc_data(auth_identifier, start_date, end_date, domain, debug=debug)
+#         if gsc_result.get("status") == "success":
+#             results.append(gsc_result)
+#         else:
+#             errors.append(gsc_result.get("message"))
+#     if not results and errors:
+#         return {"status": "error", "message": "; ".join(errors), "todays_date": datetime.now().strftime('%Y-%m-%d')}
+#     if errors:
+#         return {"status": "partial_success", "message": f"Retrieved data from {len(results)} source(s) with {len(errors)} error(s)", "errors": errors, "results": results, "todays_date": datetime.now().strftime('%Y-%m-%d')}
+#     return {"status": "success", "message": f"Retrieved data from {len(results)} source(s)", "results": results, "todays_date": datetime.now().strftime('%Y-%m-%d')}
 
 @mcp.tool()
 async def validate_ga4_parameters(dimensions: str = "", metrics: str = "") -> dict:
@@ -1345,7 +1345,7 @@ if __name__ == "__main__":
         tools = [
             "query_ga4_data",
             "query_gsc_data", 
-            "query_unified_data",
+            # "query_unified_data",
             "list_ga4_properties",
             "list_gsc_domains",
             "page_performance_ga4",
@@ -1403,7 +1403,7 @@ if __name__ == "__main__":
     for tool_name in [
         "query_ga4_data",
         "query_gsc_data",
-        "query_unified_data",
+        # "query_unified_data",
         "list_ga4_properties",
         "list_gsc_domains",
         "page_performance_ga4",
