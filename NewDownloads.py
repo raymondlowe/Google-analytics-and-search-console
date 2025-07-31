@@ -604,6 +604,14 @@ async def fetch_search_console_data_async(
         if debug:
             print(f"Filtered {len(sites_df)} sites to {len(filtered_sites)} matching domain '{domain_filter}'")
         
+        # Prioritize https://www. versions over other URL schemes
+        if len(filtered_sites) > 1:
+            https_www_sites = filtered_sites[filtered_sites['siteUrl'].str.startswith('https://www.')]
+            if not https_www_sites.empty:
+                filtered_sites = https_www_sites
+                if debug:
+                    print(f"Prioritized {len(filtered_sites)} secure www sites for domain '{domain_filter}'")
+        
         sites_df = filtered_sites
     
     if sites_df.empty:
