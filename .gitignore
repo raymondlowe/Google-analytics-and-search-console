@@ -11,3 +11,5 @@ consolidated*
 *.log
 node_modules/
 *metadata.txt
+generate_reports.sh
+*.zip
