@@ -1,0 +1,31 @@
+# Cloudflare Tunnel Configuration
+# Save this as cloudflared.yml in your tunnel directory
+
+tunnel: your-tunnel-id
+credentials-file: /path/to/your/credentials.json
+
+ingress:
+  - hostname: mcp2.wlmedia.com
+    service: http://localhost:8080
+    originRequest:
+      # Preserve Authorization headers
+      noTLSVerify: false
+      # Forward all headers including Authorization
+      httpHostHeader: "localhost:8080"
+      # Disable Cloudflare's header filtering
+      originServerName: "localhost"
+      # Allow Authorization headers to pass through
+      connectTimeout: 30s
+      tlsTimeout: 10s
+      tcpKeepAlive: 30s
+      keepAliveConnections: 100
+      keepAliveTimeout: 90s
+      # Important: This preserves all headers
+      proxyType: ""
+  
+  # Catch-all rule
+  - service: http_status:404
+
+# Additional configuration to preserve headers
+warp-routing:
+  enabled: false
