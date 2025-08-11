@@ -1241,10 +1241,14 @@ class BearerTokenMiddleware:
             await response(scope, receive, send)
             return
         
+        header_token = None
+        url_token = None
         token = None
         auth_method = None
+        header_auth_failed = False
         
-        # Primary authentication: Check Authorization header
+        # Collect authentication tokens from both sources
+        # 1. Check Authorization header
         auth_header = request.headers.get("Authorization")
         if auth_header:
             if not auth_header.startswith("Bearer "):
@@ -1262,52 +1266,67 @@ class BearerTokenMiddleware:
                 await response(scope, receive, send)
                 return
             
-            token = auth_header[7:]  # Remove "Bearer " prefix
-            auth_method = "header"
-            self.auth_stats['header_auth'] += 1
+            header_token = auth_header[7:]  # Remove "Bearer " prefix
         
-        # Fallback authentication: Check URL parameter
-        elif "key" in request.query_params:
-            token = request.query_params.get("key")
-            auth_method = "url_param"
-            self.auth_stats['url_param_auth'] += 1
-            
-            # Only log this message once per IP to avoid spam
-            if not hasattr(self, '_logged_url_param_ips'):
-                self._logged_url_param_ips = set()
-            
-            if client_ip not in self._logged_url_param_ips:
-                self.logger.info(f"Using URL parameter authentication from {client_ip} (consider using Authorization header for better security)")
-                self._logged_url_param_ips.add(client_ip)
+        # 2. Check URL parameter
+        if "key" in request.query_params:
+            url_token = request.query_params.get("key")
         
-        # No authentication provided
+        # Try authentication methods in order of preference: header first, then URL parameter
+        # Authentication succeeds if either method provides a valid token
+        
+        # Try header authentication first (if available)
+        if header_token:
+            if secure_compare(header_token, self.api_key):
+                token = header_token
+                auth_method = "header"
+                self.auth_stats['header_auth'] += 1
+            else:
+                header_auth_failed = True
+                self.logger.debug(f"Header authentication failed from {client_ip}, trying URL parameter fallback")
+        
+        # If header auth failed or wasn't provided, try URL parameter authentication
+        if not token and url_token:
+            if secure_compare(url_token, self.api_key):
+                token = url_token
+                auth_method = "url_param"
+                self.auth_stats['url_param_auth'] += 1
+                
+                # Log appropriate message based on whether header auth was attempted
+                if not hasattr(self, '_logged_url_param_ips'):
+                    self._logged_url_param_ips = set()
+                
+                if client_ip not in self._logged_url_param_ips:
+                    if header_auth_failed:
+                        self.logger.info(f"Using URL parameter authentication fallback from {client_ip} (header auth failed)")
+                    else:
+                        self.logger.info(f"Using URL parameter authentication from {client_ip} (consider using Authorization header for better security)")
+                    self._logged_url_param_ips.add(client_ip)
+        
+        # Check if authentication succeeded
         if not token:
             self.auth_stats['auth_failures'] += 1
-            self.logger.warning(f"No authentication provided from {client_ip}")
+            
+            # Provide appropriate error message based on what was attempted
+            if header_token and url_token:
+                error_message = "Both Authorization header and URL parameter provided invalid API keys"
+            elif header_token:
+                error_message = "Invalid API key in Authorization header"
+            elif url_token:
+                error_message = "Invalid API key in URL parameter"
+            else:
+                error_message = "Authentication required"
+            
+            self.logger.warning(f"Authentication failed from {client_ip}: {error_message}")
             response = JSONResponse(
                 status_code=401,
                 content={
-                    "error": "Authentication required", 
-                    "message": "Provide either 'Authorization: Bearer <token>' header or '?key=<token>' URL parameter",
+                    "error": "Authentication failed",
+                    "message": error_message + ". Provide either 'Authorization: Bearer <token>' header or '?key=<token>' URL parameter",
                     "request_id": request_id
                 }
             )
-            request_tracker.end_request(request_id, 401, "No authentication")
-            await response(scope, receive, send)
-            return
-        
-        # Validate the token using secure comparison to prevent timing attacks
-        if not secure_compare(token, self.api_key):
-            self.auth_stats['auth_failures'] += 1
-            self.logger.warning(f"Invalid API key via {auth_method} from {client_ip}")
-            response = JSONResponse(
-                status_code=401,
-                content={
-                    "error": "Invalid API key",
-                    "request_id": request_id
-                }
-            )
-            request_tracker.end_request(request_id, 401, "Invalid API key")
+            request_tracker.end_request(request_id, 401, "Authentication failed")
             await response(scope, receive, send)
             return
         
