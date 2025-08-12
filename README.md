@@ -1,7 +1,29 @@
 
 # Google Analytics & Search Console Reporting Tools
 
-This repo contains two main tools for downloading reports:
+This repo contains tools for downloading reports and a unified web dashboard:
+
+## 🚀 **NEW: Unified Web Dashboard**
+
+**Run multi-property GA4 & GSC queries through a web interface!**
+
+```bash
+uv run webfrontend.py
+# Open http://127.0.0.1:8000
+```
+
+The web dashboard provides:
+- **Multi-property queries** across all GA4 properties and GSC domains
+- **Unified data access** combining GA4 and GSC in single queries  
+- **Export functionality** (CSV/Excel)
+- **Preset queries** for common use cases
+- **Web-based query builder** with validation
+
+👉 **See [WEBAPP_README.md](WEBAPP_README.md) for complete web dashboard documentation**
+
+---
+
+## Command Line Tools
 
 ## 1. Google Search Console: `NewDownloads.py`
 
