@@ -1,0 +1,24 @@
+# Configuration for GA4 & GSC Unified Dashboard
+
+# GA4 Properties (leave empty to use all available properties for the account)
+ga4_properties:
+  # - "123456789"  # Example property ID
+  # - "987654321"  # Another property ID
+
+# GSC Domains (leave empty to use all available domains for the account)
+gsc_domains:
+  # - "https://example.com/"  # Example domain
+  # - "https://www.example.org/"  # Another domain
+
+# Default authentication account (can be overridden in UI)
+default_auth_identifier: ""
+
+# Cache settings
+cache:
+  ttl_seconds: 3600  # 1 hour
+  max_size_mb: 1024  # 1GB
+
+# Query limits
+query_limits:
+  max_rows: 10000
+  timeout_seconds: 300
