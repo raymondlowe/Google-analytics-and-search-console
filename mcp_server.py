@@ -14,10 +14,11 @@ import hashlib
 import time
 import uuid
 import warnings
-from typing import Dict, Optional
+from typing import Dict, Optional, List, Union
 from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP
 from datetime import datetime
+import concurrent.futures
 
 # Suppress Google API warnings about file_cache and oauth2client
 warnings.filterwarnings('ignore', message='file_cache is only supported with oauth2client')
@@ -216,8 +217,300 @@ def add_today_date_to_response(response: dict) -> dict:
         response["todays_date"] = datetime.now().strftime('%Y-%m-%d')
     return response
 
+def parse_multi_input(input_value: Union[str, List[str]]) -> List[str]:
+    """
+    Parse multi-property/domain input into a list.
+    
+    Accepts:
+    - Single string: "123456789"
+    - Comma-separated string: "123456789,987654321,456789123"
+    - List of strings: ["123456789", "987654321", "456789123"]
+    
+    Returns:
+    - List of strings, empty list if input is empty/None
+    """
+    if not input_value:
+        return []
+    
+    if isinstance(input_value, list):
+        # Already a list, filter out empty strings
+        return [str(item).strip() for item in input_value if str(item).strip()]
+    
+    if isinstance(input_value, str):
+        # Handle comma-separated string
+        if ',' in input_value:
+            return [item.strip() for item in input_value.split(',') if item.strip()]
+        else:
+            # Single string
+            return [input_value.strip()] if input_value.strip() else []
+    
+    # Convert other types to string and treat as single item
+    return [str(input_value).strip()] if str(input_value).strip() else []
+
+async def process_multiple_properties_ga4(
+    property_ids: List[str],
+    start_date: str,
+    end_date: str,
+    auth_identifier: str,
+    dimensions: str,
+    metrics: str,
+    debug: bool,
+    max_concurrent: int = 5
+) -> Dict:
+    """
+    Process multiple GA4 properties concurrently.
+    
+    Args:
+        property_ids: List of GA4 property IDs
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        auth_identifier: Authentication identifier
+        dimensions: Comma-separated dimensions
+        metrics: Comma-separated metrics
+        debug: Enable debug output
+        max_concurrent: Maximum concurrent requests (default: 5)
+    
+    Returns:
+        Dict containing aggregated results with source attribution
+    """
+    if not property_ids:
+        return {"status": "error", "message": "No property IDs provided"}
+    
+    async def query_single_property(property_id: str) -> Dict:
+        """Query a single GA4 property"""
+        try:
+            if debug:
+                logger.info(f"Querying GA4 property: {property_id}")
+            
+            # Use asyncio to run the sync function in a thread pool
+            loop = asyncio.get_event_loop()
+            df = await loop.run_in_executor(
+                None,
+                GA4query3.produce_report,
+                start_date,
+                end_date,
+                property_id,
+                f"Property_{property_id}",
+                auth_identifier,
+                None,  # filter_expression
+                dimensions,
+                metrics,
+                debug
+            )
+            
+            if df is not None and not df.empty:
+                # Add source attribution
+                df['source_property_id'] = property_id
+                df['source_type'] = 'ga4'
+                return {
+                    "property_id": property_id,
+                    "status": "success",
+                    "data": df,
+                    "row_count": len(df)
+                }
+            else:
+                return {
+                    "property_id": property_id,
+                    "status": "success",
+                    "data": pd.DataFrame(),
+                    "row_count": 0
+                }
+        except Exception as e:
+            logger.error(f"Error querying GA4 property {property_id}: {str(e)}")
+            return {
+                "property_id": property_id,
+                "status": "error",
+                "error": str(e),
+                "data": pd.DataFrame(),
+                "row_count": 0
+            }
+    
+    # Process properties with concurrency limit
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def limited_query(property_id: str):
+        async with semaphore:
+            return await query_single_property(property_id)
+    
+    # Execute all queries concurrently
+    tasks = [limited_query(prop_id) for prop_id in property_ids]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Aggregate results
+    all_data = []
+    successful_queries = 0
+    failed_queries = 0
+    property_results = {}
+    
+    for result in results:
+        if isinstance(result, Exception):
+            failed_queries += 1
+            continue
+        
+        property_id = result["property_id"]
+        property_results[property_id] = {
+            "status": result["status"],
+            "row_count": result["row_count"],
+            "error": result.get("error")
+        }
+        
+        if result["status"] == "success" and not result["data"].empty:
+            all_data.append(result["data"])
+            successful_queries += 1
+        elif result["status"] == "error":
+            failed_queries += 1
+    
+    # Combine all data
+    if all_data:
+        combined_df = pd.concat(all_data, ignore_index=True)
+        total_rows = len(combined_df)
+        data_records = combined_df.to_dict('records')
+    else:
+        total_rows = 0
+        data_records = []
+    
+    return {
+        "status": "success" if successful_queries > 0 else "error",
+        "message": f"Processed {len(property_ids)} properties: {successful_queries} successful, {failed_queries} failed",
+        "data": data_records,
+        "row_count": total_rows,
+        "property_count": len(property_ids),
+        "successful_properties": successful_queries,
+        "failed_properties": failed_queries,
+        "property_results": property_results
+    }
+
+async def process_multiple_domains_gsc(
+    domains: List[str],
+    start_date: str,
+    end_date: str,
+    auth_identifier: str,
+    dimensions: str,
+    search_type: str,
+    debug: bool,
+    max_concurrent: int = 5
+) -> Dict:
+    """
+    Process multiple GSC domains concurrently.
+    
+    Args:
+        domains: List of domain names
+        start_date: Start date in YYYY-MM-DD format
+        end_date: End date in YYYY-MM-DD format
+        auth_identifier: Authentication identifier
+        dimensions: Comma-separated dimensions
+        search_type: Type of search data (web, image, video)
+        debug: Enable debug output
+        max_concurrent: Maximum concurrent requests (default: 5)
+    
+    Returns:
+        Dict containing aggregated results with source attribution
+    """
+    if not domains:
+        return {"status": "error", "message": "No domains provided"}
+    
+    async def query_single_domain(domain: str) -> Dict:
+        """Query a single GSC domain"""
+        try:
+            if debug:
+                logger.info(f"Querying GSC domain: {domain}")
+            
+            # Use the async version directly
+            df = await NewDownloads.fetch_search_console_data_async(
+                start_date=start_date,
+                end_date=end_date,
+                search_type=search_type,
+                dimensions=dimensions,
+                google_account=auth_identifier,
+                wait_seconds=0,
+                debug=debug,
+                domain_filter=domain
+            )
+            
+            if df is not None and not df.empty:
+                # Add source attribution
+                df['source_domain'] = domain
+                df['source_type'] = 'gsc'
+                return {
+                    "domain": domain,
+                    "status": "success",
+                    "data": df,
+                    "row_count": len(df)
+                }
+            else:
+                return {
+                    "domain": domain,
+                    "status": "success",
+                    "data": pd.DataFrame(),
+                    "row_count": 0
+                }
+        except Exception as e:
+            logger.error(f"Error querying GSC domain {domain}: {str(e)}")
+            return {
+                "domain": domain,
+                "status": "error",
+                "error": str(e),
+                "data": pd.DataFrame(),
+                "row_count": 0
+            }
+    
+    # Process domains with concurrency limit
+    semaphore = asyncio.Semaphore(max_concurrent)
+    
+    async def limited_query(domain: str):
+        async with semaphore:
+            return await query_single_domain(domain)
+    
+    # Execute all queries concurrently
+    tasks = [limited_query(domain) for domain in domains]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+    
+    # Aggregate results
+    all_data = []
+    successful_queries = 0
+    failed_queries = 0
+    domain_results = {}
+    
+    for result in results:
+        if isinstance(result, Exception):
+            failed_queries += 1
+            continue
+        
+        domain = result["domain"]
+        domain_results[domain] = {
+            "status": result["status"],
+            "row_count": result["row_count"],
+            "error": result.get("error")
+        }
+        
+        if result["status"] == "success" and not result["data"].empty:
+            all_data.append(result["data"])
+            successful_queries += 1
+        elif result["status"] == "error":
+            failed_queries += 1
+    
+    # Combine all data
+    if all_data:
+        combined_df = pd.concat(all_data, ignore_index=True)
+        total_rows = len(combined_df)
+        data_records = combined_df.to_dict('records')
+    else:
+        total_rows = 0
+        data_records = []
+    
+    return {
+        "status": "success" if successful_queries > 0 else "error",
+        "message": f"Processed {len(domains)} domains: {successful_queries} successful, {failed_queries} failed",
+        "data": data_records,
+        "row_count": total_rows,
+        "domain_count": len(domains),
+        "successful_domains": successful_queries,
+        "failed_domains": failed_queries,
+        "domain_results": domain_results
+    }
+
 @mcp.tool()
-async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", metrics: str = "screenPageViews,totalAdRevenue,sessions", dimensions: str = "pagePath", debug: bool = False) -> dict:
+async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = "", property_id: Union[str, List[str]] = "", domain_filter: str = "", metrics: str = "screenPageViews,totalAdRevenue,sessions", dimensions: str = "pagePath", debug: bool = False) -> dict:
     """
     Query Google Analytics 4 data for comprehensive website analytics.
     
@@ -256,6 +549,16 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     - dimensions: "pagePath,sessionSource,sessionMedium"  
     - metrics: "screenPageViews,totalAdRevenue,sessions"
     
+    Multi-Property Usage Examples:
+    - Single property: property_id="123456789"
+    - Multiple properties as list: property_id=["123456789", "987654321", "456789123"]
+    - Multiple properties as comma-separated string: property_id="123456789,987654321,456789123"
+    
+    When querying multiple properties:
+    - Results include 'source_property_id' field for attribution
+    - Data is aggregated from all specified properties
+    - Partial failures are reported in 'property_results'
+    
     Filtering Behavior:
     - When property_id is specified: No domain filtering applied (for maximum data reliability)
     - When property_id is omitted: domain_filter applies to all properties (for cross-property filtering)
@@ -263,7 +566,7 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        property_id: Specific GA4 property ID (optional, queries all properties if not specified)
+        property_id: Single property ID, list of property IDs, or comma-separated string (optional, queries all properties if not specified)
         domain_filter: Filter by hostname (optional, only applied when querying all properties)
         metrics: Comma-separated metrics (default: screenPageViews,totalAdRevenue,sessions)
         dimensions: Comma-separated dimensions (default: pagePath)
@@ -301,21 +604,80 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
         return validation_details
     
     try:
-        if property_id:
-            logger.info(f"[{request_id}] Querying single GA4 property: {property_id}")
-            # When property_id is specified, don't apply domain filtering for better reliability
-            # Property ID already targets the specific property, additional filtering can exclude valid data
-            df = GA4query3.produce_report(
-                start_date=start_date,
-                end_date=end_date,
-                property_id=property_id,
-                property_name="MCP_Property",
-                account=auth_identifier,
-                filter_expression=None,  # No domain filtering when property_id is specified
-                dimensions=dimensions,
-                metrics=metrics,
-                debug=debug
-            )
+        # Parse property_id input to handle multiple properties
+        property_ids = parse_multi_input(property_id)
+        
+        if property_ids:
+            # Multiple properties or single property specified
+            if len(property_ids) == 1:
+                logger.info(f"[{request_id}] Querying single GA4 property: {property_ids[0]}")
+                # Single property - use existing logic for compatibility
+                df = GA4query3.produce_report(
+                    start_date=start_date,
+                    end_date=end_date,
+                    property_id=property_ids[0],
+                    property_name="MCP_Property",
+                    account=auth_identifier,
+                    filter_expression=None,  # No domain filtering when property_id is specified
+                    dimensions=dimensions,
+                    metrics=metrics,
+                    debug=debug
+                )
+                
+                if df is not None and not df.empty:
+                    # Add source attribution for consistency
+                    df['source_property_id'] = property_ids[0]
+                    df['source_type'] = 'ga4'
+                    
+                    duration = time.time() - start_time
+                    logger.info(f"[{request_id}] GA4 query successful - {len(df)} rows retrieved in {duration:.2f}s")
+                    return add_today_date_to_response({
+                        "status": "success",
+                        "message": f"Retrieved {len(df)} rows of GA4 data",
+                        "date_range": {"start_date": start_date, "end_date": end_date},
+                        "property_id": property_ids[0],
+                        "data": df.to_dict('records'),
+                        "row_count": len(df),
+                        "source": "ga4",
+                        "request_id": request_id,
+                        "duration_seconds": round(duration, 2)
+                    })
+                else:
+                    duration = time.time() - start_time
+                    logger.info(f"[{request_id}] GA4 query completed - no data found in {duration:.2f}s")
+                    return add_today_date_to_response({
+                        "status": "success", 
+                        "message": "No GA4 data found for the specified criteria", 
+                        "data": [], 
+                        "row_count": 0, 
+                        "source": "ga4",
+                        "request_id": request_id,
+                        "duration_seconds": round(duration, 2)
+                    })
+            else:
+                # Multiple properties - use new concurrent processing
+                logger.info(f"[{request_id}] Querying {len(property_ids)} GA4 properties: {property_ids}")
+                result = await process_multiple_properties_ga4(
+                    property_ids=property_ids,
+                    start_date=start_date,
+                    end_date=end_date,
+                    auth_identifier=auth_identifier,
+                    dimensions=dimensions,
+                    metrics=metrics,
+                    debug=debug
+                )
+                
+                duration = time.time() - start_time
+                result.update({
+                    "date_range": {"start_date": start_date, "end_date": end_date},
+                    "property_ids": property_ids,
+                    "source": "ga4",
+                    "request_id": request_id,
+                    "duration_seconds": round(duration, 2)
+                })
+                
+                logger.info(f"[{request_id}] Multi-property GA4 query completed - {result['row_count']} total rows in {duration:.2f}s")
+                return add_today_date_to_response(result)
         else:
             logger.info(f"[{request_id}] Querying all available GA4 properties")
             properties_df = GA4query3.list_properties(auth_identifier, debug=debug)
@@ -325,96 +687,50 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
                 return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
             
             logger.info(f"[{request_id}] Found {len(properties_df)} GA4 properties to query")
-            combined_df = pd.DataFrame()
-            errors = []
             
-            # Apply domain filtering only when querying all properties (to filter results across properties)
-            filter_expr = f"hostname=={domain_filter}" if domain_filter else None
-            if domain_filter:
-                logger.info(f"[{request_id}] Applying domain filter for all properties: {domain_filter}")
-            
+            # Extract property IDs and use multi-property processing
+            all_property_ids = []
             for idx, row in properties_df.iterrows():
                 pid = row.get("property_id") or row.get("id")
-                if not pid:
-                    continue
+                if pid:
+                    all_property_ids.append(str(pid))
+            
+            if all_property_ids:
+                # Use multi-property processing for all properties
+                result = await process_multiple_properties_ga4(
+                    property_ids=all_property_ids,
+                    start_date=start_date,
+                    end_date=end_date,
+                    auth_identifier=auth_identifier,
+                    dimensions=dimensions,
+                    metrics=metrics,
+                    debug=debug
+                )
                 
-                property_name = row.get("displayName", "Property")
-                logger.debug(f"Querying GA4 property: {property_name} ({pid})")
-                
-                try:
-                    df_prop = GA4query3.produce_report(
-                        start_date=start_date,
-                        end_date=end_date,
-                        property_id=pid,
-                        property_name=property_name,
-                        account=auth_identifier,
-                        filter_expression=filter_expr,
-                        dimensions=dimensions,
-                        metrics=metrics,
-                        debug=debug
-                    )
-                    if df_prop is not None and not df_prop.empty:
-                        combined_df = pd.concat([combined_df, df_prop], ignore_index=True)
-                        logger.debug(f"Property {property_name} returned {len(df_prop)} rows")
-                except Exception as prop_error:
-                    # Collect individual property errors but continue processing
-                    error_msg = f"Error for property {property_name} ({pid}): {str(prop_error)}"
-                    errors.append(error_msg)
-                    logger.warning(f"Property query failed: {error_msg}")
+                # Apply domain filtering to combined results if specified
+                if domain_filter and result.get("data"):
+                    original_count = result["row_count"]
+                    filtered_data = [row for row in result["data"] if row.get("hostname") == domain_filter]
+                    result["data"] = filtered_data
+                    result["row_count"] = len(filtered_data)
                     if debug:
-                        print(f"Property error: {error_msg}")
-            
-            df = combined_df if not combined_df.empty else None
-            
-            # If we have errors but some data, include error details in response
-            if errors and df is not None and not df.empty:
+                        logger.info(f"[{request_id}] Applied domain filter '{domain_filter}': {original_count} -> {len(filtered_data)} rows")
+                
                 duration = time.time() - start_time
-                logger.info(f"GA4 query completed with partial success - {len(df)} rows, {len(errors)} errors, {duration:.2f}s")
-                return add_today_date_to_response({
-                    "status": "partial_success",
-                    "message": f"Retrieved {len(df)} rows of GA4 data with {len(errors)} property errors",
+                result.update({
                     "date_range": {"start_date": start_date, "end_date": end_date},
-                    "data": df.to_dict('records'),
-                    "row_count": len(df),
+                    "domain_filter": domain_filter,
                     "source": "ga4",
-                    "errors": errors,
                     "request_id": request_id,
                     "duration_seconds": round(duration, 2)
                 })
-            elif errors and (df is None or df.empty):
-                # All properties failed, return error with all details
-                error_msg = f"All properties failed: {'; '.join(errors)}"
-                logger.error(f"GA4 query failed completely - {error_msg}")
+                
+                logger.info(f"[{request_id}] All-properties GA4 query completed - {result['row_count']} total rows in {duration:.2f}s")
+                return add_today_date_to_response(result)
+            else:
+                error_msg = "No valid GA4 property IDs found"
+                logger.warning(f"[{request_id}] GA4 query failed - {error_msg}")
                 return add_today_date_to_response({"status": "error", "message": error_msg, "request_id": request_id})
-        
-        if df is not None and not df.empty:
-            duration = time.time() - start_time
-            logger.info(f"GA4 query successful - {len(df)} rows retrieved in {duration:.2f}s")
-            response = {
-                "status": "success",
-                "message": f"Retrieved {len(df)} rows of GA4 data",
-                "date_range": {"start_date": start_date, "end_date": end_date},
-                "data": df.to_dict('records'),
-                "row_count": len(df),
-                "source": "ga4",
-                "request_id": request_id,
-                "duration_seconds": round(duration, 2)
-            }
-            return add_today_date_to_response(response)
-        else:
-            duration = time.time() - start_time
-            logger.info(f"GA4 query completed - no data found in {duration:.2f}s")
-            response = {
-                "status": "success", 
-                "message": "No GA4 data found for the specified criteria", 
-                "data": [], 
-                "row_count": 0, 
-                "source": "ga4",
-                "request_id": request_id,
-                "duration_seconds": round(duration, 2),
-                "todays_date": datetime.now().strftime('%Y-%m-%d')
-            }
-            return response
     except Exception as e:
         duration = time.time() - start_time
         error_msg = f"GA4 query failed: {str(e)}"
@@ -422,7 +738,7 @@ async def query_ga4_data(start_date: str, end_date: str, auth_identifier: str = 
         return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
 
 @mcp.tool()
-async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", dimensions: str = "page,query,country,device", search_type: str = "web", debug: bool = False) -> dict:
+async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = "", domain: Union[str, List[str]] = "", dimensions: str = "page,query,country,device", search_type: str = "web", debug: bool = False) -> dict:
     """
     Query Google Search Console data for search performance analysis.
     
@@ -442,10 +758,20 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
     Example: Identify mobile vs desktop performance:
     - dimensions: "page,device" to compare device performance
     
+    Multi-Domain Usage Examples:
+    - Single domain: domain="example.com"
+    - Multiple domains as list: domain=["example.com", "subdomain.example.com", "another-site.com"]
+    - Multiple domains as comma-separated string: domain="example.com,subdomain.example.com,another-site.com"
+    
+    When querying multiple domains:
+    - Results include 'source_domain' field for attribution
+    - Data is aggregated from all specified domains
+    - Partial failures are reported in 'domain_results'
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        domain: Filter by specific domain (optional, queries all domains if not specified)
+        domain: Single domain, list of domains, or comma-separated string (optional, queries all domains if not specified)
         dimensions: Comma-separated dimensions (default: page,query,country,device)
         search_type: Type of search data - web, image, video (default: web)
         debug: Enable debug output
@@ -467,48 +793,127 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
         return {"status": "error", "message": error_msg, "request_id": request_id, "todays_date": datetime.now().strftime('%Y-%m-%d')}
     
     try:
-        logger.info(f"Fetching GSC data with dimensions: {dimensions}")
+        # Parse domain input to handle multiple domains
+        domains = parse_multi_input(domain)
         
-        # Use the optimized async version for better performance
-        df = await NewDownloads.fetch_search_console_data_async(
-            start_date=start_date,
-            end_date=end_date,
-            search_type=search_type,
-            dimensions=dimensions,
-            google_account=auth_identifier,
-            wait_seconds=0,
-            debug=debug,
-            domain_filter=domain
-        )
-        
-        if df is not None and not df.empty:
-            duration = time.time() - start_time
-            logger.info(f"GSC query successful - {len(df)} rows retrieved in {duration:.2f}s")
-            return {
-                "status": "success",
-                "message": f"Retrieved {len(df)} rows of GSC data",
-                "date_range": {"start_date": start_date, "end_date": end_date},
-                "domain": domain,
-                "data": df.to_dict('records'),
-                "row_count": len(df),
-                "source": "gsc",
-                "request_id": request_id,
-                "duration_seconds": round(duration, 2),
-                "todays_date": datetime.now().strftime('%Y-%m-%d')
-            }
+        if domains:
+            # Multiple domains or single domain specified
+            if len(domains) == 1:
+                logger.info(f"[{request_id}] Querying single GSC domain: {domains[0]}")
+                # Single domain - use existing logic for compatibility
+                df = await NewDownloads.fetch_search_console_data_async(
+                    start_date=start_date,
+                    end_date=end_date,
+                    search_type=search_type,
+                    dimensions=dimensions,
+                    google_account=auth_identifier,
+                    wait_seconds=0,
+                    debug=debug,
+                    domain_filter=domains[0]
+                )
+                
+                if df is not None and not df.empty:
+                    # Add source attribution for consistency
+                    df['source_domain'] = domains[0]
+                    df['source_type'] = 'gsc'
+                    
+                    duration = time.time() - start_time
+                    logger.info(f"[{request_id}] GSC query successful - {len(df)} rows retrieved in {duration:.2f}s")
+                    return {
+                        "status": "success",
+                        "message": f"Retrieved {len(df)} rows of GSC data",
+                        "date_range": {"start_date": start_date, "end_date": end_date},
+                        "domain": domains[0],
+                        "data": df.to_dict('records'),
+                        "row_count": len(df),
+                        "source": "gsc",
+                        "request_id": request_id,
+                        "duration_seconds": round(duration, 2),
+                        "todays_date": datetime.now().strftime('%Y-%m-%d')
+                    }
+                else:
+                    duration = time.time() - start_time
+                    logger.info(f"[{request_id}] GSC query completed - no data found in {duration:.2f}s")
+                    return {
+                        "status": "success", 
+                        "message": "No GSC data found for the specified criteria", 
+                        "data": [], 
+                        "row_count": 0, 
+                        "source": "gsc",
+                        "request_id": request_id,
+                        "duration_seconds": round(duration, 2),
+                        "todays_date": datetime.now().strftime('%Y-%m-%d')
+                    }
+            else:
+                # Multiple domains - use new concurrent processing
+                logger.info(f"[{request_id}] Querying {len(domains)} GSC domains: {domains}")
+                result = await process_multiple_domains_gsc(
+                    domains=domains,
+                    start_date=start_date,
+                    end_date=end_date,
+                    auth_identifier=auth_identifier,
+                    dimensions=dimensions,
+                    search_type=search_type,
+                    debug=debug
+                )
+                
+                duration = time.time() - start_time
+                result.update({
+                    "date_range": {"start_date": start_date, "end_date": end_date},
+                    "domains": domains,
+                    "source": "gsc",
+                    "request_id": request_id,
+                    "duration_seconds": round(duration, 2),
+                    "todays_date": datetime.now().strftime('%Y-%m-%d')
+                })
+                
+                logger.info(f"[{request_id}] Multi-domain GSC query completed - {result['row_count']} total rows in {duration:.2f}s")
+                return result
         else:
-            duration = time.time() - start_time
-            logger.info(f"GSC query completed - no data found in {duration:.2f}s")
-            return {
-                "status": "success", 
-                "message": "No GSC data found for the specified criteria", 
-                "data": [], 
-                "row_count": 0, 
-                "source": "gsc",
-                "request_id": request_id,
-                "duration_seconds": round(duration, 2),
-                "todays_date": datetime.now().strftime('%Y-%m-%d')
-            }
+            logger.info(f"[{request_id}] Querying all available GSC domains")
+            # Query all domains - use the existing logic but through our new processing
+            df = await NewDownloads.fetch_search_console_data_async(
+                start_date=start_date,
+                end_date=end_date,
+                search_type=search_type,
+                dimensions=dimensions,
+                google_account=auth_identifier,
+                wait_seconds=0,
+                debug=debug,
+                domain_filter=None  # Query all domains
+            )
+            
+            if df is not None and not df.empty:
+                # Add source attribution
+                df['source_type'] = 'gsc'
+                # Note: When querying all domains, the source_domain will be derived from the data itself
+                
+                duration = time.time() - start_time
+                logger.info(f"[{request_id}] All-domains GSC query successful - {len(df)} rows retrieved in {duration:.2f}s")
+                return {
+                    "status": "success",
+                    "message": f"Retrieved {len(df)} rows of GSC data from all domains",
+                    "date_range": {"start_date": start_date, "end_date": end_date},
+                    "data": df.to_dict('records'),
+                    "row_count": len(df),
+                    "source": "gsc",
+                    "request_id": request_id,
+                    "duration_seconds": round(duration, 2),
+                    "todays_date": datetime.now().strftime('%Y-%m-%d')
+                }
+            else:
+                duration = time.time() - start_time
+                logger.info(f"[{request_id}] All-domains GSC query completed - no data found in {duration:.2f}s")
+                return {
+                    "status": "success", 
+                    "message": "No GSC data found for the specified criteria", 
+                    "data": [], 
+                    "row_count": 0, 
+                    "source": "gsc",
+                    "request_id": request_id,
+                    "duration_seconds": round(duration, 2),
+                    "todays_date": datetime.now().strftime('%Y-%m-%d')
+                }
     except Exception as e:
         duration = time.time() - start_time
         error_msg = f"GSC query failed: {str(e)}"
@@ -705,7 +1110,7 @@ async def list_gsc_domains(auth_identifier: str = "", debug: bool = False) -> di
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache page performance queries for 1 hour
-async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
+async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: Union[str, List[str]] = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze page performance metrics for content optimization and SEO.
     
@@ -720,10 +1125,15 @@ async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: 
     
     Returns data optimized for: Content optimization, SEO strategy, user experience improvements
     
+    Multi-Property Usage Examples:
+    - Single property: property_id="123456789"
+    - Multiple properties as list: property_id=["123456789", "987654321"]
+    - Multiple properties as comma-separated: property_id="123456789,987654321"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        property_id: Specific GA4 property ID (optional)
+        property_id: Single property ID, list of property IDs, or comma-separated string (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
     """
