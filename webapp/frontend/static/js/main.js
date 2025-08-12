@@ -267,7 +267,7 @@ class Dashboard {
             dimensions: dimensions,
             metrics: metrics,
             auth_identifier: document.getElementById('authIdentifier').value,
-            debug: false
+            debug: document.getElementById('debugMode').checked
         };
         
         if (properties.length > 0) {

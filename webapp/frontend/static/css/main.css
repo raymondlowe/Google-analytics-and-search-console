@@ -61,6 +61,30 @@ header p {
     padding-bottom: 5px;
 }
 
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.debug-toggle {
+    font-size: 14px;
+}
+
+.debug-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    color: #666;
+}
+
+.debug-toggle input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
 .form-group {
     margin-bottom: 15px;
 }
