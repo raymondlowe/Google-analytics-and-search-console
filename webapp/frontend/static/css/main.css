@@ -403,3 +403,67 @@ input:focus, select:focus {
         padding: 8px;
     }
 }
+
+/* Progress indicator styles */
+.progress-container {
+    margin: 20px 0;
+    text-align: center;
+}
+
+.progress-bar-wrapper {
+    width: 100%;
+    max-width: 400px;
+    height: 8px;
+    background-color: #e9ecef;
+    border-radius: 4px;
+    margin: 0 auto 10px;
+    overflow: hidden;
+}
+
+.progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, #007bff, #0056b3);
+    border-radius: 4px;
+    transition: width 0.3s ease;
+    width: 0%;
+}
+
+.progress-text {
+    font-size: 14px;
+    color: #6c757d;
+    margin-top: 5px;
+}
+
+/* Cancel button styles */
+.btn-cancel {
+    background-color: #dc3545;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 14px;
+    margin-top: 10px;
+    transition: background-color 0.2s;
+}
+
+.btn-cancel:hover {
+    background-color: #c82333;
+}
+
+.btn-cancel:disabled {
+    background-color: #6c757d;
+    cursor: not-allowed;
+}
+
+/* Loading container enhancements */
+#loadingContainer {
+    text-align: center;
+    padding: 40px 20px;
+}
+
+#loadingContainer p {
+    margin: 20px 0 10px;
+    font-size: 16px;
+    color: #6c757d;
+}

@@ -24,13 +24,15 @@ class QueryRequest(BaseModel):
 class QueryResponse(BaseModel):
     """Response model for query results"""
     query_id: str
-    status: str  # "running", "completed", "failed"
+    status: str  # "queued", "running", "completed", "failed", "cancelled"
     data: Optional[List[Dict[str, Any]]] = None
     error: Optional[str] = None
     row_count: Optional[int] = None
     cache_hit: bool = False
     execution_time_ms: Optional[float] = None
     sources_queried: List[str] = []
+    progress: Optional[Dict[str, Any]] = None  # {"current": 1, "total": 3, "message": "Processing GA4 data..."}
+    can_cancel: bool = False
 
 
 class PresetQuery(BaseModel):
@@ -47,3 +49,14 @@ class MetaInfo(BaseModel):
     source: str  # "ga4" or "gsc"
     dimensions: List[Dict[str, str]]  # [{"id": "pagePath", "name": "Page Path", "type": "string"}]
     metrics: List[Dict[str, str]]  # [{"id": "screenPageViews", "name": "Screen Page Views", "type": "integer"}]
+
+
+class PaginatedResponse(BaseModel):
+    """Paginated response for large result sets"""
+    data: List[Dict[str, Any]]
+    total_rows: int
+    page: int
+    page_size: int
+    total_pages: int
+    has_next: bool
+    has_prev: bool

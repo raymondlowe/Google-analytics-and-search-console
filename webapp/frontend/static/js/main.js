@@ -31,6 +31,13 @@ class Dashboard {
         
         // Auth identifier change
         document.getElementById('authIdentifier').addEventListener('change', () => this.loadProperties());
+        
+        // Cancel query button (will be added dynamically)
+        document.addEventListener('click', (e) => {
+            if (e.target && e.target.id === 'cancelQuery') {
+                this.cancelQuery();
+            }
+        });
     }
     
     setDefaultDates() {
@@ -284,6 +291,11 @@ class Dashboard {
                 
                 const result = await response.json();
                 
+                // Update progress indicator
+                if (result.progress) {
+                    this.updateProgress(result.progress);
+                }
+                
                 if (result.status === 'completed') {
                     clearInterval(this.pollInterval);
                     this.hideLoading();
@@ -299,6 +311,17 @@ class Dashboard {
                     clearInterval(this.pollInterval);
                     this.hideLoading();
                     this.showStatus(`Query failed: ${result.error}`, 'error');
+                    
+                } else if (result.status === 'cancelled') {
+                    clearInterval(this.pollInterval);
+                    this.hideLoading();
+                    this.showStatus('Query was cancelled', 'info');
+                    
+                } else if (result.status === 'running' || result.status === 'queued') {
+                    // Show cancel button if cancellation is supported
+                    if (result.can_cancel) {
+                        this.showCancelButton();
+                    }
                 }
                 
             } catch (error) {
@@ -430,6 +453,10 @@ class Dashboard {
         document.getElementById('exportButtons').style.display = 'none';
         this.currentQueryId = null;
         
+        // Clear progress and cancel button
+        this.hideProgress();
+        this.hideCancelButton();
+        
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
@@ -444,6 +471,8 @@ class Dashboard {
     hideLoading() {
         document.getElementById('loadingContainer').style.display = 'none';
         document.getElementById('resultsContainer').style.display = 'block';
+        this.hideProgress();
+        this.hideCancelButton();
     }
     
     showStatus(message, type = 'info') {
@@ -461,6 +490,61 @@ class Dashboard {
     
     hideStatus() {
         document.getElementById('statusPanel').style.display = 'none';
+    }
+    
+    updateProgress(progress) {
+        const progressContainer = document.getElementById('progressContainer');
+        const progressBar = document.getElementById('progressBar');
+        const progressText = document.getElementById('progressText');
+        
+        if (progress && progressContainer && progressBar && progressText) {
+            const percentage = (progress.current / progress.total) * 100;
+            progressBar.style.width = `${percentage}%`;
+            progressText.textContent = progress.message || `Step ${progress.current} of ${progress.total}`;
+            progressContainer.style.display = 'block';
+        }
+    }
+    
+    hideProgress() {
+        const progressContainer = document.getElementById('progressContainer');
+        if (progressContainer) {
+            progressContainer.style.display = 'none';
+        }
+    }
+    
+    showCancelButton() {
+        const cancelButton = document.getElementById('cancelQuery');
+        if (cancelButton) {
+            cancelButton.style.display = 'inline-block';
+        }
+    }
+    
+    hideCancelButton() {
+        const cancelButton = document.getElementById('cancelQuery');
+        if (cancelButton) {
+            cancelButton.style.display = 'none';
+        }
+    }
+    
+    async cancelQuery() {
+        if (!this.currentQueryId) return;
+        
+        try {
+            const response = await fetch(`/api/query/${this.currentQueryId}/cancel`, {
+                method: 'DELETE'
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            this.showStatus('Query cancellation requested', 'info');
+            this.hideCancelButton();
+            
+        } catch (error) {
+            console.error('Error cancelling query:', error);
+            this.showStatus(`Error cancelling query: ${error.message}`, 'error');
+        }
     }
 }
 

@@ -13,7 +13,7 @@ from typing import Dict, Any, Optional
 import json
 import xlsxwriter
 
-from core.query_models import QueryRequest, QueryResponse
+from core.query_models import QueryRequest, QueryResponse, PaginatedResponse
 from core.cache import UnifiedCache
 from data_providers import DataProviderRegistry
 
@@ -25,17 +25,28 @@ router = APIRouter()
 cache = UnifiedCache()
 data_registry = DataProviderRegistry()
 active_queries: Dict[str, Dict[str, Any]] = {}
+cancel_flags: Dict[str, bool] = {}  # Track cancellation requests
 
 
 async def execute_query_background(query_id: str, query_request: QueryRequest):
-    """Background task to execute query"""
+    """Background task to execute query with progress tracking and cancellation support"""
     start_time = time.time()
     
     try:
-        # Update status
-        active_queries[query_id]["status"] = "running"
+        # Update status and initialize progress
+        active_queries[query_id].update({
+            "status": "running",
+            "progress": {"current": 0, "total": 3, "message": "Initializing query..."},
+            "can_cancel": True
+        })
         
-        # Check cache first
+        # Check for cancellation
+        if cancel_flags.get(query_id, False):
+            active_queries[query_id]["status"] = "cancelled"
+            return
+        
+        # Step 1: Check cache
+        active_queries[query_id]["progress"] = {"current": 1, "total": 3, "message": "Checking cache..."}
         query_data = query_request.dict()
         cached_result = cache.get_cached_query(query_data, ttl_seconds=3600)
         
@@ -48,13 +59,22 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
                 "row_count": len(cached_result["data"]),
                 "cache_hit": True,
                 "execution_time_ms": execution_time,
-                "sources_queried": query_request.sources
+                "sources_queried": query_request.sources,
+                "progress": {"current": 3, "total": 3, "message": "Completed (cache hit)"},
+                "can_cancel": False
             })
             
             cache.log_query(query_data, execution_time, True, len(cached_result["data"]))
             return
         
-        # Execute fresh query
+        # Check for cancellation
+        if cancel_flags.get(query_id, False):
+            active_queries[query_id]["status"] = "cancelled"
+            return
+        
+        # Step 2: Execute fresh query
+        active_queries[query_id]["progress"] = {"current": 2, "total": 3, "message": f"Querying {', '.join(query_request.sources)} data..."}
+        
         results = await data_registry.execute_unified_query(
             start_date=query_request.start_date.isoformat(),
             end_date=query_request.end_date.isoformat(),
@@ -66,6 +86,14 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             debug=query_request.debug,
             filters=query_request.filters
         )
+        
+        # Check for cancellation after query execution
+        if cancel_flags.get(query_id, False):
+            active_queries[query_id]["status"] = "cancelled"
+            return
+        
+        # Step 3: Process results
+        active_queries[query_id]["progress"] = {"current": 3, "total": 3, "message": "Processing results..."}
         
         # Apply sorting if specified
         if query_request.sort and results:
@@ -92,7 +120,9 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             "row_count": len(results),
             "cache_hit": False,
             "execution_time_ms": execution_time,
-            "sources_queried": query_request.sources
+            "sources_queried": query_request.sources,
+            "progress": {"current": 3, "total": 3, "message": "Completed"},
+            "can_cancel": False
         })
         
         # Cache the result
@@ -105,8 +135,12 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
         active_queries[query_id].update({
             "status": "failed",
             "error": str(e),
-            "execution_time_ms": (time.time() - start_time) * 1000
+            "execution_time_ms": (time.time() - start_time) * 1000,
+            "can_cancel": False
         })
+    finally:
+        # Clean up cancellation flag
+        cancel_flags.pop(query_id, None)
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -147,7 +181,9 @@ async def get_query_status(query_id: str):
         row_count=query_info.get("row_count"),
         cache_hit=query_info.get("cache_hit", False),
         execution_time_ms=query_info.get("execution_time_ms"),
-        sources_queried=query_info.get("sources_queried", [])
+        sources_queried=query_info.get("sources_queried", []),
+        progress=query_info.get("progress"),
+        can_cancel=query_info.get("can_cancel", False)
     )
 
 
@@ -226,13 +262,79 @@ async def export_xlsx(query_id: str):
     )
 
 
+@router.delete("/query/{query_id}/cancel")
+async def cancel_query(query_id: str):
+    """Cancel a running query"""
+    if query_id not in active_queries:
+        raise HTTPException(status_code=404, detail="Query not found")
+    
+    query_info = active_queries[query_id]
+    if query_info["status"] not in ["queued", "running"]:
+        raise HTTPException(status_code=400, detail="Query cannot be cancelled in current state")
+    
+    # Set cancellation flag
+    cancel_flags[query_id] = True
+    
+    # Update query status
+    active_queries[query_id].update({
+        "status": "cancelled",
+        "can_cancel": False
+    })
+    
+    return {"message": "Query cancellation requested"}
+
+
+@router.get("/query/{query_id}/results", response_model=PaginatedResponse)
+async def get_paginated_results(query_id: str, page: int = 1, page_size: int = 100):
+    """Get paginated query results"""
+    if query_id not in active_queries:
+        raise HTTPException(status_code=404, detail="Query not found")
+    
+    query_info = active_queries[query_id]
+    if query_info["status"] != "completed":
+        raise HTTPException(status_code=400, detail="Query not completed")
+    
+    data = query_info.get("data", [])
+    total_rows = len(data)
+    
+    # Validate pagination parameters
+    if page < 1:
+        page = 1
+    if page_size < 1:
+        page_size = 100
+    if page_size > 1000:  # Limit max page size
+        page_size = 1000
+    
+    # Calculate pagination
+    start_idx = (page - 1) * page_size
+    end_idx = start_idx + page_size
+    paginated_data = data[start_idx:end_idx]
+    
+    total_pages = (total_rows + page_size - 1) // page_size
+    has_next = page < total_pages
+    has_prev = page > 1
+    
+    return PaginatedResponse(
+        data=paginated_data,
+        total_rows=total_rows,
+        page=page,
+        page_size=page_size,
+        total_pages=total_pages,
+        has_next=has_next,
+        has_prev=has_prev
+    )
+
+
 @router.delete("/query/{query_id}")
 async def delete_query(query_id: str):
     """Delete a query from memory"""
     if query_id not in active_queries:
         raise HTTPException(status_code=404, detail="Query not found")
     
+    # Clean up both active queries and cancel flags
     del active_queries[query_id]
+    cancel_flags.pop(query_id, None)
+    
     return {"message": "Query deleted successfully"}
 
 
