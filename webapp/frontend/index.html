@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GA4 & GSC Unified Dashboard</title>
+    <link rel="stylesheet" href="/static/css/main.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>GA4 & GSC Unified Dashboard</h1>
+            <p>Query and analyze data across multiple Google Analytics 4 properties and Search Console domains</p>
+        </header>
+
+        <div class="dashboard">
+            <!-- Query Builder Section -->
+            <section class="query-builder">
+                <h2>Query Builder</h2>
+                
+                <div class="form-group">
+                    <label>Date Range:</label>
+                    <div class="date-inputs">
+                        <input type="date" id="startDate" required>
+                        <span>to</span>
+                        <input type="date" id="endDate" required>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Data Sources:</label>
+                    <div class="checkbox-group">
+                        <label><input type="checkbox" id="sourceGA4" value="ga4" checked> Google Analytics 4</label>
+                        <label><input type="checkbox" id="sourceGSC" value="gsc"> Google Search Console</label>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Authentication:</label>
+                    <input type="text" id="authIdentifier" placeholder="Account token (optional)" value="">
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Dimensions:</label>
+                        <select id="dimensionsSelect" multiple size="6">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group half">
+                        <label>Metrics:</label>
+                        <select id="metricsSelect" multiple size="6">
+                            <option value="">Loading...</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="form-group">
+                    <label>Properties/Domains (leave empty for all):</label>
+                    <select id="propertiesSelect" multiple size="4">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group half">
+                        <label>Sort by:</label>
+                        <select id="sortField">
+                            <option value="">No sorting</option>
+                        </select>
+                        <select id="sortOrder">
+                            <option value="desc">Descending</option>
+                            <option value="asc">Ascending</option>
+                        </select>
+                    </div>
+                    
+                    <div class="form-group half">
+                        <label>Limit Results:</label>
+                        <input type="number" id="limitResults" placeholder="Max rows (optional)" min="1" max="10000">
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button id="executeQuery" class="btn btn-primary">Execute Query</button>
+                    <button id="loadPreset" class="btn btn-secondary">Load Preset</button>
+                    <button id="clearQuery" class="btn btn-secondary">Clear</button>
+                </div>
+            </section>
+
+            <!-- Presets Section -->
+            <section class="presets" id="presetsSection" style="display: none;">
+                <h3>Available Presets</h3>
+                <div id="presetsList"></div>
+                <button id="closePresets" class="btn btn-secondary">Close</button>
+            </section>
+
+            <!-- Results Section -->
+            <section class="results">
+                <div class="results-header">
+                    <h2>Query Results</h2>
+                    <div id="resultsInfo" class="results-info"></div>
+                    <div class="export-buttons" id="exportButtons" style="display: none;">
+                        <button id="exportCSV" class="btn btn-export">Export CSV</button>
+                        <button id="exportExcel" class="btn btn-export">Export Excel</button>
+                    </div>
+                </div>
+                
+                <div id="resultsContainer">
+                    <div class="no-results">
+                        <p>Execute a query to see results here.</p>
+                    </div>
+                </div>
+                
+                <div id="loadingContainer" style="display: none;">
+                    <div class="loading-spinner"></div>
+                    <p>Executing query...</p>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <!-- Status Panel -->
+    <div id="statusPanel" class="status-panel">
+        <div id="statusContent"></div>
+    </div>
+
+    <script src="/static/js/main.js"></script>
+    <script src="/static/js/query_builder.js"></script>
+    <script src="/static/js/presets.js"></script>
+</body>
+</html>
