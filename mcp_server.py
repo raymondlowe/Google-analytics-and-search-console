@@ -1148,7 +1148,7 @@ async def page_performance_ga4(start_date: str, end_date: str, auth_identifier: 
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache traffic sources queries for 1 hour
-async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
+async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: Union[str, List[str]] = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze traffic sources to understand how visitors find your website.
     
@@ -1163,10 +1163,15 @@ async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: s
     
     Returns data optimized for: Marketing optimization, channel attribution, campaign analysis
     
+    Multi-Property Usage Examples:
+    - Single property: property_id="123456789"
+    - Multiple properties as list: property_id=["123456789", "987654321"]
+    - Multiple properties as comma-separated: property_id="123456789,987654321"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        property_id: Specific GA4 property ID (optional)
+        property_id: Single property ID, list of property IDs, or comma-separated string (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
     """
@@ -1181,7 +1186,7 @@ async def traffic_sources_ga4(start_date: str, end_date: str, auth_identifier: s
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache audience analysis queries for 1 hour
-async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
+async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: Union[str, List[str]] = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze your website audience demographics and behavior patterns.
     
@@ -1196,10 +1201,15 @@ async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier:
     
     Returns data optimized for: Content personalization, UX optimization, market research
     
+    Multi-Property Usage Examples:
+    - Single property: property_id="123456789"
+    - Multiple properties as list: property_id=["123456789", "987654321"]
+    - Multiple properties as comma-separated: property_id="123456789,987654321"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        property_id: Specific GA4 property ID (optional)
+        property_id: Single property ID, list of property IDs, or comma-separated string (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
     """
@@ -1214,7 +1224,7 @@ async def audience_analysis_ga4(start_date: str, end_date: str, auth_identifier:
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache revenue analysis queries for 1 hour
-async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: str = "", domain_filter: str = "", debug: bool = False) -> dict:
+async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: str = "", property_id: Union[str, List[str]] = "", domain_filter: str = "", debug: bool = False) -> dict:
     """
     Analyze AdSense revenue and monetization performance across your website.
     
@@ -1229,10 +1239,15 @@ async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: 
     
     Returns data optimized for: Monetization strategy, ad placement optimization, revenue growth
     
+    Multi-Property Usage Examples:
+    - Single property: property_id="123456789"
+    - Multiple properties as list: property_id=["123456789", "987654321"]
+    - Multiple properties as comma-separated: property_id="123456789,987654321"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        property_id: Specific GA4 property ID (optional)
+        property_id: Single property ID, list of property IDs, or comma-separated string (optional)
         domain_filter: Filter by hostname (optional)
         debug: Enable debug output
     """
@@ -1249,7 +1264,7 @@ async def revenue_analysis_ga4(start_date: str, end_date: str, auth_identifier: 
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache GSC page performance queries for 1 hour
-async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", debug: bool = False) -> dict:
+async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: Union[str, List[str]] = "", debug: bool = False) -> dict:
     """
     Analyze page performance in Google Search to identify SEO optimization opportunities.
     
@@ -1264,10 +1279,15 @@ async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: 
     
     Returns data optimized for: Content optimization, title/meta improvements, CTR optimization
     
+    Multi-Domain Usage Examples:
+    - Single domain: domain="example.com"
+    - Multiple domains as list: domain=["example.com", "subdomain.example.com"]
+    - Multiple domains as comma-separated: domain="example.com,subdomain.example.com"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        domain: Filter by specific domain (optional)
+        domain: Single domain, list of domains, or comma-separated string (optional)
         debug: Enable debug output
     """
     if not start_date or not end_date:
@@ -1280,7 +1300,7 @@ async def page_performance_gsc(start_date: str, end_date: str, auth_identifier: 
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache GSC query analysis for 1 hour
-async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", debug: bool = False) -> dict:
+async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: Union[str, List[str]] = "", debug: bool = False) -> dict:
     """
     Analyze search query performance to identify keyword opportunities and content gaps.
     
@@ -1295,10 +1315,15 @@ async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: st
     
     Returns data optimized for: Keyword strategy, content planning, SEO optimization
     
+    Multi-Domain Usage Examples:
+    - Single domain: domain="example.com"
+    - Multiple domains as list: domain=["example.com", "subdomain.example.com"]
+    - Multiple domains as comma-separated: domain="example.com,subdomain.example.com"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        domain: Filter by specific domain (optional)
+        domain: Single domain, list of domains, or comma-separated string (optional)
         debug: Enable debug output
     """
     if not start_date or not end_date:
@@ -1311,7 +1336,7 @@ async def query_analysis_gsc(start_date: str, end_date: str, auth_identifier: st
 
 @mcp.tool()
 @async_persistent_cache(expire_time=3600)  # Cache GSC page-query opportunities for 1 hour
-async def page_query_opportunities_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: str = "", debug: bool = False) -> dict:
+async def page_query_opportunities_gsc(start_date: str, end_date: str, auth_identifier: str = "", domain: Union[str, List[str]] = "", debug: bool = False) -> dict:
     """
     Analyze page-query combinations to find content optimization opportunities.
     
@@ -1326,10 +1351,15 @@ async def page_query_opportunities_gsc(start_date: str, end_date: str, auth_iden
     
     Returns data optimized for: Content optimization, on-page SEO, competitive analysis
     
+    Multi-Domain Usage Examples:
+    - Single domain: domain="example.com"
+    - Multiple domains as list: domain=["example.com", "subdomain.example.com"]
+    - Multiple domains as comma-separated: domain="example.com,subdomain.example.com"
+    
     Args:
         start_date: Start date in YYYY-MM-DD format (required)
         end_date: End date in YYYY-MM-DD format (required)
-        domain: Filter by specific domain (optional)
+        domain: Single domain, list of domains, or comma-separated string (optional)
         debug: Enable debug output
     """
     if not start_date or not end_date:
