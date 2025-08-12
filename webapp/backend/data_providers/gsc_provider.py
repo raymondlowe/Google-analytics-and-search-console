@@ -76,7 +76,8 @@ class GSCProvider:
         try:
             # Get the GSC service using existing authentication
             from googleAPIget_service import get_service
-            service = get_service('searchconsole', 'v1', auth_identifier)
+            scope = ['https://www.googleapis.com/auth/webmasters.readonly']
+            service = get_service('webmasters', 'v3', scope, 'client_secrets.json', auth_identifier)
             
             sites = service.sites().list().execute()
             return sites.get('siteEntry', [])

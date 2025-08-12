@@ -32,6 +32,10 @@ class Dashboard {
         // Auth identifier change
         document.getElementById('authIdentifier').addEventListener('change', () => this.loadProperties());
         
+        // Credentials upload
+        document.getElementById('uploadCredentialsBtn').addEventListener('click', () => this.openFileUpload());
+        document.getElementById('credentialsUpload').addEventListener('change', (e) => this.uploadCredentials(e));
+        
         // Cancel query button (will be added dynamically)
         document.addEventListener('click', (e) => {
             if (e.target && e.target.id === 'cancelQuery') {
@@ -44,8 +48,16 @@ class Dashboard {
         const today = new Date();
         const weekAgo = new Date(today.getTime() - 7 * 24 * 60 * 60 * 1000);
         
-        document.getElementById('endDate').value = today.toISOString().split('T')[0];
-        document.getElementById('startDate').value = weekAgo.toISOString().split('T')[0];
+        // Use local date instead of UTC to avoid timezone conflicts
+        const formatLocalDate = (date) => {
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        };
+        
+        document.getElementById('endDate').value = formatLocalDate(today);
+        document.getElementById('startDate').value = formatLocalDate(weekAgo);
     }
     
     async loadMetadata() {
@@ -357,9 +369,23 @@ class Dashboard {
         const thead = document.createElement('thead');
         const headerRow = document.createElement('tr');
         
-        headers.forEach(header => {
+        headers.forEach((header, index) => {
             const th = document.createElement('th');
             th.textContent = header;
+            th.style.cursor = 'pointer';
+            th.style.userSelect = 'none';
+            th.className = 'sortable-header';
+            th.title = `Click to sort by ${header}`;
+            
+            // Add sort indicator
+            const sortIcon = document.createElement('span');
+            sortIcon.className = 'sort-icon';
+            sortIcon.innerHTML = ' ⇅'; // Up-down arrow
+            th.appendChild(sortIcon);
+            
+            // Add click handler for sorting
+            th.addEventListener('click', () => this.sortTable(table, index, header));
+            
             headerRow.appendChild(th);
         });
         
@@ -383,12 +409,19 @@ class Dashboard {
                     badge.textContent = value.toUpperCase();
                     td.appendChild(badge);
                 } else {
-                    // Format numbers
+                    // Format numbers to avoid scientific notation
                     if (typeof value === 'number') {
                         if (value % 1 === 0) {
+                            // Integer formatting
                             value = value.toLocaleString();
                         } else {
-                            value = value.toLocaleString(undefined, { maximumFractionDigits: 2 });
+                            // Handle very small decimal numbers to avoid scientific notation
+                            if (Math.abs(value) < 0.001 && value !== 0) {
+                                // Use fixed notation for very small numbers
+                                value = value.toFixed(6).replace(/\.?0+$/, '');
+                            } else {
+                                value = value.toLocaleString(undefined, { maximumFractionDigits: 6 });
+                            }
                         }
                     }
                     td.textContent = value || '';
@@ -403,6 +436,63 @@ class Dashboard {
         table.appendChild(tbody);
         container.innerHTML = '';
         container.appendChild(table);
+    }
+    
+    sortTable(table, columnIndex, columnName) {
+        const tbody = table.querySelector('tbody');
+        const rows = Array.from(tbody.querySelectorAll('tr'));
+        const headers = table.querySelectorAll('th');
+        
+        // Determine current sort direction
+        const currentHeader = headers[columnIndex];
+        const currentDirection = currentHeader.getAttribute('data-sort-direction') || 'none';
+        let newDirection = 'asc';
+        
+        if (currentDirection === 'asc') {
+            newDirection = 'desc';
+        } else if (currentDirection === 'desc') {
+            newDirection = 'asc';
+        }
+        
+        // Clear all sort indicators
+        headers.forEach(header => {
+            header.removeAttribute('data-sort-direction');
+            const sortIcon = header.querySelector('.sort-icon');
+            if (sortIcon) {
+                sortIcon.innerHTML = ' ⇅';
+            }
+        });
+        
+        // Set new sort direction and icon
+        currentHeader.setAttribute('data-sort-direction', newDirection);
+        const sortIcon = currentHeader.querySelector('.sort-icon');
+        if (sortIcon) {
+            sortIcon.innerHTML = newDirection === 'asc' ? ' ↑' : ' ↓';
+        }
+        
+        // Sort rows
+        rows.sort((a, b) => {
+            const aValue = a.cells[columnIndex].textContent.trim();
+            const bValue = b.cells[columnIndex].textContent.trim();
+            
+            // Try to parse as numbers first
+            const aNum = parseFloat(aValue.replace(/,/g, ''));
+            const bNum = parseFloat(bValue.replace(/,/g, ''));
+            
+            let comparison = 0;
+            if (!isNaN(aNum) && !isNaN(bNum)) {
+                // Numeric comparison
+                comparison = aNum - bNum;
+            } else {
+                // String comparison
+                comparison = aValue.localeCompare(bValue);
+            }
+            
+            return newDirection === 'asc' ? comparison : -comparison;
+        });
+        
+        // Re-append sorted rows
+        rows.forEach(row => tbody.appendChild(row));
     }
     
     async exportResults(format) {
@@ -498,9 +588,14 @@ class Dashboard {
         const progressText = document.getElementById('progressText');
         
         if (progress && progressContainer && progressBar && progressText) {
-            const percentage = (progress.current / progress.total) * 100;
+            const percentage = Math.round((progress.current / progress.total) * 100);
             progressBar.style.width = `${percentage}%`;
-            progressText.textContent = progress.message || `Step ${progress.current} of ${progress.total}`;
+            
+            // Enhanced progress text with percentage and step indicators
+            const stepText = `${progress.current}/${progress.total}`;
+            const message = progress.message || 'Processing...';
+            progressText.textContent = `${message} (${stepText} - ${percentage}%)`;
+            
             progressContainer.style.display = 'block';
         }
     }
@@ -545,6 +640,67 @@ class Dashboard {
             console.error('Error cancelling query:', error);
             this.showStatus(`Error cancelling query: ${error.message}`, 'error');
         }
+    }
+    
+    openFileUpload() {
+        document.getElementById('credentialsUpload').click();
+    }
+    
+    async uploadCredentials(event) {
+        const file = event.target.files[0];
+        if (!file) return;
+        
+        const statusEl = document.getElementById('credentialsStatus');
+        
+        // Validate file type
+        if (!file.name.endsWith('.json')) {
+            statusEl.textContent = 'Please select a JSON file';
+            statusEl.className = 'upload-status error';
+            return;
+        }
+        
+        // Validate file content
+        try {
+            const text = await file.text();
+            const json = JSON.parse(text);
+            
+            // Basic validation for Google credentials
+            if (!json.installed && !json.web) {
+                throw new Error('Invalid Google credentials format');
+            }
+            
+            statusEl.textContent = 'Uploading...';
+            statusEl.className = 'upload-status';
+            
+            // Upload file to server
+            const formData = new FormData();
+            formData.append('file', file);
+            
+            const response = await fetch('/api/upload-credentials', {
+                method: 'POST',
+                body: formData
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const result = await response.json();
+            statusEl.textContent = '✓ Credentials uploaded successfully';
+            statusEl.className = 'upload-status success';
+            
+            // Refresh metadata to get updated properties
+            await this.loadMetadata();
+            this.updateFormFields();
+            
+        } catch (error) {
+            console.error('Error uploading credentials:', error);
+            statusEl.textContent = `Error: ${error.message}`;
+            statusEl.className = 'upload-status error';
+        }
+        
+        // Clear file input
+        event.target.value = '';
     }
 }
 

@@ -40,6 +40,21 @@
                     <input type="text" id="authIdentifier" placeholder="Account token (optional)" value="">
                 </div>
 
+                <div class="form-group">
+                    <label>Google Credentials:</label>
+                    <div class="upload-section">
+                        <input type="file" id="credentialsUpload" accept=".json" style="display: none;">
+                        <button type="button" id="uploadCredentialsBtn" class="btn btn-secondary">
+                            📁 Upload client_secrets.json
+                        </button>
+                        <span id="credentialsStatus" class="upload-status"></span>
+                    </div>
+                    <div class="help-text">
+                        Upload your Google client secrets JSON file for authentication. 
+                        <a href="https://developers.google.com/analytics/devguides/config/mgmt/v3/quickstart/client-libraries" target="_blank">Get credentials</a>
+                    </div>
+                </div>
+
                 <div class="form-row">
                     <div class="form-group half">
                         <label>Dimensions:</label>
