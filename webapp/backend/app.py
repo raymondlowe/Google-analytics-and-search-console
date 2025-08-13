@@ -66,7 +66,7 @@ async def read_root():
     """Serve the main dashboard page"""
     try:
         frontend_path = Path(__file__).parent.parent / "frontend"
-        with open(frontend_path / "index.html", "r") as f:
+        with open(frontend_path / "index.html", "r", encoding="utf-8") as f:
             return HTMLResponse(content=f.read())
     except FileNotFoundError:
         return HTMLResponse("""
