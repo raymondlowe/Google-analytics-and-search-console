@@ -53,13 +53,16 @@ class GSCProvider:
     
     async def list_domains(self, auth_identifier: str = "") -> List[Dict[str, str]]:
         """List available GSC domains/sites"""
+        logger.info(f"GSC Provider: Starting domain listing for auth_identifier='{auth_identifier}'")
         try:
             # Use existing NewDownloads function to get domain list
             domains = await asyncio.get_event_loop().run_in_executor(
                 None, self._get_domains_sync, auth_identifier
             )
             
-            return [
+            logger.info(f"GSC Provider: Successfully retrieved {len(domains)} raw domains")
+            
+            result = [
                 {
                     "id": domain["siteUrl"],
                     "name": domain["siteUrl"],
@@ -67,22 +70,51 @@ class GSCProvider:
                 }
                 for domain in domains
             ]
+            
+            logger.info(f"GSC Provider: Returning {len(result)} formatted domains")
+            return result
         except Exception as e:
-            logger.error(f"Error listing GSC domains: {e}")
+            logger.error(f"GSC Provider: Error listing GSC domains: {e}")
+            import traceback
+            logger.error(f"GSC Provider: Traceback: {traceback.format_exc()}")
             return []
     
     def _get_domains_sync(self, auth_identifier: str) -> List[Dict[str, str]]:
         """Synchronous helper to get domains using existing NewDownloads logic"""
+        logger.info(f"GSC Provider: Starting sync domain retrieval for auth_identifier='{auth_identifier}'")
         try:
             # Get the GSC service using existing authentication
             from googleAPIget_service import get_service
-            scope = ['https://www.googleapis.com/auth/webmasters.readonly']
-            service = get_service('webmasters', 'v3', scope, 'client_secrets.json', auth_identifier)
+            import os
             
+            # Use CLIENT_SECRETS_PATH environment variable or fallback to default
+            client_secrets_path = os.environ.get('CLIENT_SECRETS_PATH', 'client_secrets.json')
+            logger.info(f"GSC Provider: CLIENT_SECRETS_PATH from environment: {client_secrets_path}")
+            
+            # If the path is relative, make it relative to the repository root
+            if not os.path.isabs(client_secrets_path):
+                # Get repository root (4 levels up from this file)
+                repo_root = Path(__file__).parent.parent.parent.parent
+                client_secrets_path = str(repo_root / client_secrets_path)
+            
+            logger.info(f"GSC Provider: Using resolved client secrets path: {client_secrets_path}")
+            logger.info(f"GSC Provider: Client secrets file exists: {os.path.exists(client_secrets_path)}")
+            
+            scope = ['https://www.googleapis.com/auth/webmasters.readonly']
+            logger.info(f"GSC Provider: Calling get_service with scope: {scope}")
+            service = get_service('webmasters', 'v3', scope, client_secrets_path, auth_identifier)
+            
+            logger.info("GSC Provider: Successfully obtained GSC service, calling sites().list()")
             sites = service.sites().list().execute()
-            return sites.get('siteEntry', [])
+            
+            site_entries = sites.get('siteEntry', [])
+            logger.info(f"GSC Provider: Retrieved {len(site_entries)} site entries from GSC API")
+            
+            return site_entries
         except Exception as e:
-            logger.error(f"Error in _get_domains_sync: {e}")
+            logger.error(f"GSC Provider: Error in _get_domains_sync: {e}")
+            import traceback
+            logger.error(f"GSC Provider: Traceback: {traceback.format_exc()}")
             return []
     
     async def execute_query(self, start_date: str, end_date: str,
