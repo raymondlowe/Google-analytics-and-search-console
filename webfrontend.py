@@ -98,15 +98,22 @@ if __name__ == "__main__":
     print(f"Log level: {log_level.upper()}")
     print(f"Client secrets: {args.client_secrets}")
     print(f"Config directory: {args.config}")
+    print(f"Current working directory: {os.getcwd()}")
+    print(f"Environment variables:")
+    for k, v in os.environ.items():
+        if k in ["DEBUG_MODE", "CLIENT_SECRETS_PATH", "CONFIG_PATH"]:
+            print(f"  {k}: {v}")
     print("\nPress Ctrl+C to stop the server")
     
     # Change to the backend directory
     os.chdir(repo_root / "webapp" / "backend")
-    
+    print(f"Changed working directory to: {os.getcwd()}")
+    print("Starting Uvicorn with access log enabled and debug logging...")
     uvicorn.run(
         "app:app",
         host=args.host,
         port=args.port,
         reload=args.reload,
-        log_level=log_level
+        log_level=log_level,
+        access_log=True
     )

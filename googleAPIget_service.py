@@ -31,10 +31,11 @@ def get_service(api_name, api_version, scope, client_secrets_path, usernameToken
       setattr(flags, 'noauth_local_webserver', True)
 
   import os
-  if usernameToken == "":
+  # Fix: treat None as empty string for usernameToken
+  if not usernameToken:
     combined_client_secrets_path = client_secrets_path
   else:
-    combined_client_secrets_path = usernameToken+"-"+client_secrets_path
+    combined_client_secrets_path = str(usernameToken) + "-" + client_secrets_path
 
   # If the custom client secrets file does not exist, fall back to the default
   if not os.path.exists(combined_client_secrets_path):
@@ -58,10 +59,12 @@ def get_service(api_name, api_version, scope, client_secrets_path, usernameToken
   # flow. The Storage object will ensure that if successful the good
   # credentials will get written back to a file.
 
-  if usernameToken == "":
+  # Ensure usernameToken is always a string, never None
+  safe_username_token = str(usernameToken) if usernameToken else ""
+  if safe_username_token == "":
     combined_data_file_name = api_name + '.dat'
   else:
-    combined_data_file_name = usernameToken+"-"+api_name + '.dat'
+    combined_data_file_name = safe_username_token + "-" + api_name + '.dat'
 
   storage = file.Storage(combined_data_file_name)
   credentials = storage.get()

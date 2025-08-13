@@ -102,7 +102,9 @@ class GSCProvider:
             
             scope = ['https://www.googleapis.com/auth/webmasters.readonly']
             logger.info(f"GSC Provider: Calling get_service with scope: {scope}")
-            service = get_service('webmasters', 'v3', scope, client_secrets_path, auth_identifier)
+            # Only use auth_identifier for token file if it is not blank
+            token_identifier = auth_identifier if auth_identifier.strip() else None
+            service = get_service('webmasters', 'v3', scope, client_secrets_path, token_identifier)
             
             logger.info("GSC Provider: Successfully obtained GSC service, calling sites().list()")
             sites = service.sites().list().execute()

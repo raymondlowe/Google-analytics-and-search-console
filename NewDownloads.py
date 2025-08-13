@@ -587,9 +587,10 @@ async def fetch_search_console_data_async(
     multi_dimension = len(dimensions_array) > 1
     
     if debug:
-        print(f"Starting async GSC data fetch - domain_filter: {domain_filter}")
+        print(f"[DEBUG] fetch_search_console_data_async called with:")
+        print(f"  start_date={start_date}, end_date={end_date}, search_type={search_type}, dimensions={dimensions}, google_account={google_account}, domain_filter={domain_filter}")
         cache_stats = _domain_cache.get_stats()
-        print(f"Domain cache stats: {cache_stats}")
+        print(f"  Domain cache stats: {cache_stats}")
     
     # Get cached domain list instead of making API calls every time
     sites_df = await asyncio.to_thread(list_search_console_sites, google_account, debug, True, extra_auth_flags)
@@ -601,6 +602,8 @@ async def fetch_search_console_data_async(
     
     # Filter sites based on domain_filter early to avoid unnecessary API calls
     if domain_filter:
+        if debug:
+            print(f"[DEBUG] Filtering sites for domain_filter: {domain_filter}")
         filter_domain = domain_filter.lower().strip()
         if filter_domain.startswith('www.'):
             filter_domain = filter_domain[4:]
@@ -622,7 +625,7 @@ async def fetch_search_console_data_async(
         filtered_sites = sites_df[sites_df.apply(matches_domain, axis=1)]
         
         if debug:
-            print(f"Filtered {len(sites_df)} sites to {len(filtered_sites)} matching domain '{domain_filter}'")
+            print(f"[DEBUG] Filtered {len(sites_df)} sites to {len(filtered_sites)} matching domain '{domain_filter}'")
         
         # Prioritize https://www. versions over other URL schemes
         if len(filtered_sites) > 1:
@@ -630,20 +633,20 @@ async def fetch_search_console_data_async(
             if not https_www_sites.empty:
                 filtered_sites = https_www_sites
                 if debug:
-                    print(f"Prioritized {len(filtered_sites)} secure www sites for domain '{domain_filter}'")
+                    print(f"[DEBUG] Prioritized {len(filtered_sites)} secure www sites for domain '{domain_filter}'")
         
         sites_df = filtered_sites
     
     if sites_df.empty:
         if debug:
-            print(f"No sites match domain filter: {domain_filter}")
+            print(f"[DEBUG] No sites match domain filter: {domain_filter}")
         return pd.DataFrame()
     
     # Group sites by account for concurrent processing
     sites_by_account = sites_df.groupby('account')
     
     if debug:
-        print(f"Processing {len(sites_df)} sites across {len(sites_by_account)} accounts")
+        print(f"[DEBUG] Processing {len(sites_df)} sites across {len(sites_by_account)} accounts")
     
     # Process accounts concurrently
     account_tasks = []
@@ -671,7 +674,7 @@ async def fetch_search_console_data_async(
     if len(combined_df) > 0:
         combined_df.reset_index(drop=True, inplace=True)
         if debug:
-            print(f"Successfully retrieved {len(combined_df)} rows total")
+            print(f"[DEBUG] Successfully retrieved {len(combined_df)} rows total")
     
     return combined_df
 

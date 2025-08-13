@@ -28,9 +28,16 @@ import GA4query3
 import NewDownloads
 from NewDownloads import async_persistent_cache
 
-# Configure enhanced logging with structured format but simpler format for compatibility
+
+# Configure enhanced logging with structured format, and set level based on DEBUG_MODE env
+import os
+log_level = os.environ.get("DEBUG_MODE", "false").lower()
+if log_level == "true":
+    logging_level = logging.DEBUG
+else:
+    logging_level = logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=logging_level,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     datefmt='%Y-%m-%d %H:%M:%S'
 )
@@ -801,6 +808,7 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
             if len(domains) == 1:
                 logger.info(f"[{request_id}] Querying single GSC domain: {domains[0]}")
                 # Single domain - use existing logic for compatibility
+                logger.info(f"[{request_id}] Calling fetch_search_console_data_async with params: start_date={start_date}, end_date={end_date}, search_type={search_type}, dimensions={dimensions}, google_account={auth_identifier}, wait_seconds=0, debug={debug}, domain_filter={domains[0]}")
                 df = await NewDownloads.fetch_search_console_data_async(
                     start_date=start_date,
                     end_date=end_date,
@@ -872,6 +880,7 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
         else:
             logger.info(f"[{request_id}] Querying all available GSC domains")
             # Query all domains - use the existing logic but through our new processing
+            logger.info(f"[{request_id}] Calling fetch_search_console_data_async with params: start_date={start_date}, end_date={end_date}, search_type={search_type}, dimensions={dimensions}, google_account={auth_identifier}, wait_seconds=0, debug={debug}, domain_filter=None (all domains)")
             df = await NewDownloads.fetch_search_console_data_async(
                 start_date=start_date,
                 end_date=end_date,
