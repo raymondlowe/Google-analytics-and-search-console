@@ -16,6 +16,7 @@ from progress.bar import IncrementalBar
 from googleAPIget_service import get_service
 from urllib.parse import urlparse
 import diskcache as dc
+from pathlib import Path
 
 # Import win_unicode_console only when needed for CLI
 try:
@@ -24,6 +25,22 @@ try:
 except ImportError:
     # Skip if not available (e.g., when running in web environments)
     pass
+
+def get_client_secrets_path(default_path='client_secrets.json'):
+    """
+    Get the resolved path to client_secrets.json, checking environment variables and making paths absolute.
+    This ensures consistent path resolution between CLI and webapp usage.
+    """
+    # Use CLIENT_SECRETS_PATH environment variable if set (for webapp), otherwise use default
+    client_secrets_path = os.environ.get('CLIENT_SECRETS_PATH', default_path)
+    
+    # If the path is relative, resolve it relative to the script's directory
+    if not os.path.isabs(client_secrets_path):
+        # Get the directory where this script is located
+        script_dir = Path(__file__).parent
+        client_secrets_path = str(script_dir / client_secrets_path)
+    
+    return client_secrets_path
 
 # Performance optimization: Domain caching to avoid repeated API calls
 @dataclass
@@ -472,7 +489,10 @@ def list_search_console_sites(google_account="", debug=False, use_cache=True, ex
         
         try:
             # Authenticate and construct service
-            service = get_service('webmasters', 'v3', scope, 'client_secrets.json', this_google_account, extra_auth_flags)
+            client_secrets_path = get_client_secrets_path()
+            if debug:
+                print(f"Using client secrets path: {client_secrets_path}")
+            service = get_service('webmasters', 'v3', scope, client_secrets_path, this_google_account, extra_auth_flags)
             profiles = service.sites().list().execute()
             
             if 'siteEntry' not in profiles:
@@ -667,8 +687,11 @@ async def _process_account_sites_async(
     
     try:
         # Get service in thread to avoid blocking
+        client_secrets_path = get_client_secrets_path()
+        if debug:
+            print(f"Async: Using client secrets path: {client_secrets_path}")
         service = await asyncio.to_thread(
-            get_service, 'webmasters', 'v3', scope, 'client_secrets.json', account, extra_auth_flags
+            get_service, 'webmasters', 'v3', scope, client_secrets_path, account, extra_auth_flags
         )
         
         # Process sites concurrently (but limit concurrency to avoid quota issues)
