@@ -47,13 +47,14 @@ class DataProviderRegistry:
         """Execute query across multiple data sources and return unified results"""
         
         all_results = []
-        
+        gsc_results = []
+
         for source in sources:
             provider = self.get_provider(source)
             if not provider:
                 logger.warning(f"Unknown data source: {source}")
                 continue
-            
+
             try:
                 if source == "ga4":
                     # GA4 specific handling
@@ -68,15 +69,17 @@ class DataProviderRegistry:
                         filters=filters,
                         debug=debug
                     )
+                    normalized_data = provider.normalize_data(df)
+                    all_results.extend(normalized_data)
                 elif source == "gsc":
                     # GSC specific handling - filter dimensions to only valid GSC ones
                     gsc_metadata = await provider.get_metadata()
                     valid_gsc_dims = [dim["id"] for dim in gsc_metadata["dimensions"]]
                     gsc_dimensions = [dim for dim in dimensions if dim in valid_gsc_dims]
-                    
+
                     if not gsc_dimensions:
                         gsc_dimensions = ["page"]  # Default to page if no valid dimensions
-                    
+
                     df = await provider.execute_query(
                         start_date=start_date,
                         end_date=end_date,
@@ -85,15 +88,19 @@ class DataProviderRegistry:
                         auth_identifier=auth_identifier,
                         debug=debug
                     )
+                    normalized_data = provider.normalize_data(df)
+                    gsc_results.extend(normalized_data)
                 else:
                     continue
-                
-                # Normalize and add to results
-                normalized_data = provider.normalize_data(df)
-                all_results.extend(normalized_data)
-                
+
             except Exception as e:
                 logger.error(f"Error executing query for {source}: {e}")
                 continue
-        
+
+        # Aggregate GSC domain variants if any GSC results
+        if gsc_results:
+            from .aggregate_domains import aggregate_gsc_domain_variants
+            gsc_results = aggregate_gsc_domain_variants(gsc_results)
+            all_results.extend(gsc_results)
+
         return all_results

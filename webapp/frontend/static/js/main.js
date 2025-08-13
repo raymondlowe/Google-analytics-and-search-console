@@ -161,21 +161,42 @@ class Dashboard {
     updatePropertiesSelect() {
         const select = document.getElementById('propertiesSelect');
         select.innerHTML = '';
-        
+
         const sources = this.getSelectedSources();
-        
+
         sources.forEach(source => {
             if (this.metadata.properties && this.metadata.properties[source]) {
                 const optgroup = document.createElement('optgroup');
                 optgroup.label = source.toUpperCase();
-                
-                this.metadata.properties[source].forEach(prop => {
+
+                let properties = this.metadata.properties[source];
+                if (source === 'gsc') {
+                    // Deduplicate by base domain, prefer https://www., then https://, then any
+                    const domainMap = {};
+                    properties.forEach(prop => {
+                        // Extract base domain (strip protocol and www)
+                        let url = prop.id;
+                        let base = url.replace(/^https?:\/\/(www\.)?/, '').replace(/\/$/, '');
+                        if (!domainMap[base]) domainMap[base] = [];
+                        domainMap[base].push(prop);
+                    });
+                    // For each base, pick best available: https://www. > https:// > anything
+                    properties = Object.values(domainMap).map(props => {
+                        let best = props.find(p => p.id.startsWith('https://www.'));
+                        if (!best) best = props.find(p => p.id.startsWith('https://'));
+                        if (!best) best = props[0];
+                        return best;
+                    });
+                }
+
+                properties.forEach(prop => {
                     const option = document.createElement('option');
                     option.value = prop.id;
                     option.textContent = prop.display_name || prop.name;
+                    option.selected = true; // Select all by default
                     optgroup.appendChild(option);
                 });
-                
+
                 select.appendChild(optgroup);
             }
         });
