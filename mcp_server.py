@@ -787,7 +787,9 @@ async def query_gsc_data(start_date: str, end_date: str, auth_identifier: str = 
     request_id = str(uuid.uuid4())[:8]
     set_request_context(request_id)
     
-    logger.info(f"Starting GSC query - dates: {start_date} to {end_date}, domain: {domain or 'all'}, search_type: {search_type}")
+    # Parse domain input to handle multiple domains
+    domains_list = parse_multi_input(domain)
+    logger.info(f"Starting GSC query - dates: {start_date} to {end_date}, domain(s): {domains_list if domains_list else 'all'}, search_type: {search_type}")
     
     if not start_date or not end_date:
         error_msg = "start_date and end_date are required parameters"
