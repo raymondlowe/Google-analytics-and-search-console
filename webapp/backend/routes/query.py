@@ -32,6 +32,11 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
     """Background task to execute query with progress tracking and cancellation support"""
     start_time = time.time()
     
+    # Log query start with details
+    logger.info(f"Starting query {query_id[:8]}... - Sources: {query_request.sources}, "
+                f"Date range: {query_request.start_date} to {query_request.end_date}, "
+                f"Dimensions: {query_request.dimensions}, Metrics: {query_request.metrics}")
+    
     try:
         # Update status and initialize progress
         active_queries[query_id].update({
@@ -46,6 +51,7 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             return
         
         # Step 1: Check cache
+        logger.info(f"Query {query_id[:8]}... - Checking cache...")
         active_queries[query_id]["progress"] = {"current": 1, "total": 3, "message": "Checking cache..."}
         query_data = query_request.dict()
         cached_result = cache.get_cached_query(query_data, ttl_seconds=3600)
@@ -53,6 +59,7 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
         if cached_result and not query_request.debug:
             # Cache hit
             execution_time = (time.time() - start_time) * 1000
+            logger.info(f"Query {query_id[:8]}... - Cache hit! Returning {len(cached_result['data'])} rows in {execution_time:.1f}ms")
             active_queries[query_id].update({
                 "status": "completed",
                 "data": cached_result["data"],
@@ -73,6 +80,7 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             return
         
         # Step 2: Execute fresh query
+        logger.info(f"Query {query_id[:8]}... - Executing fresh query on {', '.join(query_request.sources)} data sources...")
         active_queries[query_id]["progress"] = {"current": 2, "total": 3, "message": f"Querying {', '.join(query_request.sources)} data..."}
         
         results = await data_registry.execute_unified_query(
@@ -87,16 +95,20 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             filters=query_request.filters
         )
         
+        logger.info(f"Query {query_id[:8]}... - Raw query returned {len(results) if results else 0} rows")
+        
         # Check for cancellation after query execution
         if cancel_flags.get(query_id, False):
             active_queries[query_id]["status"] = "cancelled"
             return
         
         # Step 3: Process results
+        logger.info(f"Query {query_id[:8]}... - Processing and formatting results...")
         active_queries[query_id]["progress"] = {"current": 3, "total": 3, "message": "Processing results..."}
         
         # Apply sorting if specified
         if query_request.sort and results:
+            logger.info(f"Query {query_id[:8]}... - Applying sorting: {query_request.sort}")
             for sort_spec in reversed(query_request.sort):
                 field = sort_spec.get("field")
                 reverse = sort_spec.get("order", "asc").lower() == "desc"
@@ -109,9 +121,15 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
         
         # Apply limit if specified
         if query_request.limit and query_request.limit > 0:
+            original_count = len(results)
             results = results[:query_request.limit]
+            if original_count > query_request.limit:
+                logger.info(f"Query {query_id[:8]}... - Limited results from {original_count} to {query_request.limit} rows")
         
         execution_time = (time.time() - start_time) * 1000
+        
+        logger.info(f"Query {query_id[:8]}... - Completed successfully! "
+                   f"Returned {len(results)} rows in {execution_time:.1f}ms")
         
         # Update query status
         active_queries[query_id].update({
@@ -131,12 +149,15 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
         cache.log_query(query_data, execution_time, False, len(results))
         
     except Exception as e:
-        logger.error(f"Error executing query {query_id}: {e}")
+        execution_time = (time.time() - start_time) * 1000
+        logger.error(f"Query {query_id[:8]}... - FAILED after {execution_time:.1f}ms: {str(e)}")
+        logger.error(f"Query {query_id[:8]}... - Error details: {type(e).__name__}: {str(e)}")
         active_queries[query_id].update({
             "status": "failed",
             "error": str(e),
-            "execution_time_ms": (time.time() - start_time) * 1000,
-            "can_cancel": False
+            "execution_time_ms": execution_time,
+            "can_cancel": False,
+            "progress": {"current": 3, "total": 3, "message": f"Failed: {str(e)}"}
         })
     finally:
         # Clean up cancellation flag
@@ -147,6 +168,8 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
 async def create_query(query_request: QueryRequest, background_tasks: BackgroundTasks):
     """Create and execute a new query"""
     query_id = str(uuid.uuid4())
+    
+    logger.info(f"Created new query {query_id[:8]}... - Request queued for processing")
     
     # Initialize query tracking
     active_queries[query_id] = {

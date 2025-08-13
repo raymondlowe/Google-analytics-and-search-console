@@ -9,13 +9,14 @@ from pathlib import Path
 repo_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(repo_root))
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 import logging
 import time
 import uuid
+import shutil
 from typing import Dict, Any
 import asyncio
 
@@ -101,6 +102,48 @@ async def health_check():
         "timestamp": time.time(),
         "cache_stats": cache.get_cache_stats()
     }
+
+@app.post("/api/upload-credentials")
+async def upload_credentials(file: UploadFile = File(...)):
+    """Upload Google credentials file"""
+    try:
+        # Validate file type
+        if not file.filename.endswith('.json'):
+            raise HTTPException(status_code=400, detail="File must be a JSON file")
+        
+        # Read and validate content
+        content = await file.read()
+        try:
+            import json
+            creds_data = json.loads(content)
+            
+            # Basic validation for Google credentials
+            if not ('installed' in creds_data or 'web' in creds_data):
+                raise HTTPException(status_code=400, detail="Invalid Google credentials format")
+                
+        except json.JSONDecodeError:
+            raise HTTPException(status_code=400, detail="Invalid JSON file")
+        
+        # Save to the repository root (where other files expect it)
+        target_path = repo_root / "client_secrets.json"
+        
+        # Write the file
+        with open(target_path, 'wb') as f:
+            f.write(content)
+        
+        logger.info(f"Credentials uploaded successfully to {target_path}")
+        
+        return {
+            "status": "success",
+            "message": "Credentials uploaded successfully",
+            "filename": file.filename
+        }
+        
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error uploading credentials: {e}")
+        raise HTTPException(status_code=500, detail=f"Error uploading credentials: {str(e)}")
 
 @app.on_event("startup")
 async def startup_event():

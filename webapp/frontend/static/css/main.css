@@ -61,6 +61,30 @@ header p {
     padding-bottom: 5px;
 }
 
+.section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 20px;
+}
+
+.debug-toggle {
+    font-size: 14px;
+}
+
+.debug-toggle label {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    cursor: pointer;
+    color: #666;
+}
+
+.debug-toggle input[type="checkbox"] {
+    width: auto;
+    margin: 0;
+}
+
 .form-group {
     margin-bottom: 15px;
 }
@@ -127,6 +151,41 @@ input:focus, select:focus {
 .checkbox-group input[type="checkbox"] {
     width: auto;
     margin-right: 8px;
+}
+
+.upload-section {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 5px;
+}
+
+.upload-status {
+    font-size: 12px;
+    color: #666;
+}
+
+.upload-status.success {
+    color: #28a745;
+}
+
+.upload-status.error {
+    color: #dc3545;
+}
+
+.help-text {
+    font-size: 12px;
+    color: #666;
+    margin-top: 5px;
+}
+
+.help-text a {
+    color: #667eea;
+    text-decoration: none;
+}
+
+.help-text a:hover {
+    text-decoration: underline;
 }
 
 .button-group {
@@ -235,6 +294,28 @@ input:focus, select:focus {
     position: sticky;
     top: 0;
     z-index: 1;
+}
+
+.sortable-header {
+    cursor: pointer;
+    user-select: none;
+    transition: background-color 0.2s ease;
+}
+
+.sortable-header:hover {
+    background: #e9ecef !important;
+}
+
+.sort-icon {
+    opacity: 0.5;
+    font-size: 12px;
+    margin-left: 4px;
+}
+
+.sortable-header[data-sort-direction="asc"] .sort-icon,
+.sortable-header[data-sort-direction="desc"] .sort-icon {
+    opacity: 1;
+    color: #007bff;
 }
 
 .results-table tr:hover {
