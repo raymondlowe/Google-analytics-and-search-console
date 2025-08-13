@@ -604,11 +604,18 @@ async def fetch_search_console_data_async(
     if domain_filter:
         if debug:
             print(f"[DEBUG] Filtering sites for domain_filter: {domain_filter}")
+        # Accept both full URLs and domains for filtering
         filter_domain = domain_filter.lower().strip()
+        # If filter_domain is a URL, extract the hostname
+        try:
+            parsed = urlparse(filter_domain)
+            if parsed.hostname:
+                filter_domain = parsed.hostname
+        except Exception:
+            pass
         if filter_domain.startswith('www.'):
             filter_domain = filter_domain[4:]
-        
-        # Filter sites to only those matching the domain filter
+
         def matches_domain(row):
             site_url = row['siteUrl']
             if site_url.startswith('sc-domain:'):
@@ -616,25 +623,23 @@ async def fetch_search_console_data_async(
             else:
                 parsed = urlparse(site_url)
                 current_domain = parsed.hostname.lower() if parsed.hostname else ''
-            
             if current_domain.startswith('www.'):
                 current_domain = current_domain[4:]
-            
             return current_domain == filter_domain
         
         filtered_sites = sites_df[sites_df.apply(matches_domain, axis=1)]
-        
+
         if debug:
             print(f"[DEBUG] Filtered {len(sites_df)} sites to {len(filtered_sites)} matching domain '{domain_filter}'")
-        
-        # Prioritize https://www. versions over other URL schemes
+
+        # Always prefer https://www. version if available
         if len(filtered_sites) > 1:
             https_www_sites = filtered_sites[filtered_sites['siteUrl'].str.startswith('https://www.')]
             if not https_www_sites.empty:
-                filtered_sites = https_www_sites
                 if debug:
-                    print(f"[DEBUG] Prioritized {len(filtered_sites)} secure www sites for domain '{domain_filter}'")
-        
+                    print(f"[DEBUG] Returning only https://www. version(s) for domain '{filter_domain}'")
+                filtered_sites = https_www_sites
+
         sites_df = filtered_sites
     
     if sites_df.empty:
