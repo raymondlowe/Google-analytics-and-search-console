@@ -94,6 +94,12 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
         await broadcast_progress(query_id)
         print(f"[PROGRESS] Query {query_id[:8]}... Querying {', '.join(query_request.sources)} data...")
         
+        # Create progress callback for more granular updates
+        async def progress_update(progress_info):
+            active_queries[query_id]["progress"] = progress_info
+            await broadcast_progress(query_id)
+            print(f"[PROGRESS] Query {query_id[:8]}... {progress_info['message']}")
+        
         results = await data_registry.execute_unified_query(
             start_date=query_request.start_date.isoformat(),
             end_date=query_request.end_date.isoformat(),
@@ -103,7 +109,8 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             properties=query_request.properties,
             auth_identifier=query_request.auth_identifier,
             debug=query_request.debug,
-            filters=query_request.filters
+            filters=query_request.filters,
+            progress_callback=progress_update
         )
         
         logger.info(f"Query {query_id[:8]}... - Raw query returned {len(results) if results else 0} rows")

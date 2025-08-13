@@ -394,9 +394,33 @@ class Dashboard {
             return;
         }
         
-        // Update results info
-        document.getElementById('resultsInfo').textContent = 
-            `${result.row_count} rows • ${Math.round(result.execution_time_ms)}ms • Sources: ${result.sources_queried.join(', ')}`;
+        // Update results info with pagination awareness
+        const totalRows = result.row_count || result.data.length;
+        const displayedRows = result.data.length;
+        let resultsText = `${totalRows} total rows`;
+        
+        if (totalRows > displayedRows) {
+            resultsText += ` (showing first ${displayedRows})`;
+        }
+        
+        resultsText += ` • ${Math.round(result.execution_time_ms)}ms • Sources: ${result.sources_queried.join(', ')}`;
+        
+        document.getElementById('resultsInfo').textContent = resultsText;
+        
+        // Show pagination info if needed
+        if (totalRows > displayedRows) {
+            const paginationInfo = document.createElement('div');
+            paginationInfo.className = 'pagination-info';
+            paginationInfo.innerHTML = `
+                <p><strong>Note:</strong> Showing first ${displayedRows} rows of ${totalRows} total. 
+                <button id="loadAllResults" class="btn btn-secondary">Load All Results</button>
+                or use Export to download complete dataset.</p>
+            `;
+            container.appendChild(paginationInfo);
+            
+            // Add event listener for loading all results
+            document.getElementById('loadAllResults').addEventListener('click', () => this.loadAllResults());
+        }
         
         // Show export buttons
         document.getElementById('exportButtons').style.display = 'flex';
@@ -745,6 +769,57 @@ class Dashboard {
         
         // Clear file input
         event.target.value = '';
+    }
+    
+    async loadAllResults() {
+        if (!this.currentQueryId) {
+            this.showStatus('No query to load results for', 'error');
+            return;
+        }
+        
+        try {
+            this.showStatus('Loading all results...', 'info');
+            
+            // Fetch paginated results to get all data
+            let allData = [];
+            let page = 1;
+            const pageSize = 1000; // Large page size for efficiency
+            let hasMore = true;
+            
+            while (hasMore) {
+                const response = await fetch(`/api/query/${this.currentQueryId}/results?page=${page}&page_size=${pageSize}`);
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const paginatedResult = await response.json();
+                allData = allData.concat(paginatedResult.data);
+                
+                hasMore = paginatedResult.has_next;
+                page++;
+                
+                // Update progress
+                this.showStatus(`Loading results... ${allData.length} rows loaded`, 'info');
+            }
+            
+            // Create a fake result object with all data
+            const fullResult = {
+                data: allData,
+                row_count: allData.length,
+                execution_time_ms: 0, // No execution time for loaded results
+                sources_queried: ['cached'],
+                cache_hit: true
+            };
+            
+            // Display all results
+            this.displayResults(fullResult);
+            this.showStatus(`All ${allData.length} results loaded successfully`, 'success');
+            
+        } catch (error) {
+            console.error('Error loading all results:', error);
+            this.showStatus(`Error loading all results: ${error.message}`, 'error');
+        }
     }
 }
 

@@ -43,17 +43,28 @@ class DataProviderRegistry:
                                   sources: List[str], dimensions: List[str],
                                   metrics: List[str], properties: Optional[List[str]] = None,
                                   auth_identifier: str = "", debug: bool = False,
-                                  filters: Optional[Dict[str, Any]] = None) -> List[Dict[str, Any]]:
+                                  filters: Optional[Dict[str, Any]] = None,
+                                  progress_callback=None) -> List[Dict[str, Any]]:
         """Execute query across multiple data sources and return unified results"""
         
         all_results = []
         gsc_results = []
+        total_sources = len(sources)
+        current_source = 0
 
         for source in sources:
             provider = self.get_provider(source)
             if not provider:
                 logger.warning(f"Unknown data source: {source}")
                 continue
+
+            # Report progress for starting this source
+            if progress_callback:
+                await progress_callback({
+                    "current": 2,
+                    "total": 3,
+                    "message": f"Querying {source.upper()} data... ({current_source + 1}/{total_sources})"
+                })
 
             try:
                 if source == "ga4":
@@ -71,6 +82,8 @@ class DataProviderRegistry:
                     )
                     normalized_data = provider.normalize_data(df)
                     all_results.extend(normalized_data)
+                    logger.info(f"GA4 query completed: {len(normalized_data)} rows retrieved")
+                    
                 elif source == "gsc":
                     # GSC specific handling - filter dimensions to only valid GSC ones
                     gsc_metadata = await provider.get_metadata()
@@ -90,15 +103,32 @@ class DataProviderRegistry:
                     )
                     normalized_data = provider.normalize_data(df)
                     gsc_results.extend(normalized_data)
+                    logger.info(f"GSC query completed: {len(normalized_data)} rows retrieved")
                 else:
                     continue
 
+                # Report progress after completing this source
+                current_source += 1
+                if progress_callback and current_source < total_sources:
+                    await progress_callback({
+                        "current": 2,
+                        "total": 3,
+                        "message": f"Completed {source.upper()}, processing next source... ({current_source}/{total_sources})"
+                    })
+
             except Exception as e:
                 logger.error(f"Error executing query for {source}: {e}")
+                current_source += 1
                 continue
 
         # Aggregate GSC domain variants if any GSC results
         if gsc_results:
+            if progress_callback:
+                await progress_callback({
+                    "current": 2,
+                    "total": 3,
+                    "message": "Aggregating GSC domain variants..."
+                })
             from .aggregate_domains import aggregate_gsc_domain_variants
             gsc_results = aggregate_gsc_domain_variants(gsc_results)
             all_results.extend(gsc_results)
