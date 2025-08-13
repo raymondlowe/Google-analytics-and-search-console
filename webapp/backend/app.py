@@ -9,7 +9,7 @@ from pathlib import Path
 repo_root = Path(__file__).parent.parent.parent
 sys.path.insert(0, str(repo_root))
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, WebSocket, WebSocketDisconnect
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,6 +19,7 @@ import uuid
 import shutil
 from typing import Dict, Any
 import asyncio
+from fastapi import Request
 
 from core.query_models import QueryRequest, QueryResponse, MetaInfo
 from core.cache import UnifiedCache
@@ -49,8 +50,9 @@ app.add_middleware(
 cache = UnifiedCache()
 data_registry = DataProviderRegistry()
 
-# Store for active queries
 active_queries: Dict[str, Dict[str, Any]] = {}
+# Store websocket connections for progress updates
+progress_websockets: Dict[str, WebSocket] = {}
 
 # Mount static files
 frontend_path = Path(__file__).parent.parent / "frontend"
@@ -58,6 +60,21 @@ app.mount("/static", StaticFiles(directory=str(frontend_path / "static")), name=
 
 # Include routers
 app.include_router(query.router, prefix="/api", tags=["queries"])
+
+# WebSocket endpoint for query progress
+@app.websocket("/api/query/{query_id}/progress")
+async def query_progress_ws(websocket: WebSocket, query_id: str):
+    await websocket.accept()
+    progress_websockets[query_id] = websocket
+    try:
+        while True:
+            # Wait for client to stay connected
+            await asyncio.sleep(1)
+    except WebSocketDisconnect:
+        progress_websockets.pop(query_id, None)
+    except Exception as e:
+        logger.error(f"WebSocket error for query {query_id}: {e}")
+        progress_websockets.pop(query_id, None)
 app.include_router(presets.router, prefix="/api", tags=["presets"])
 app.include_router(meta.router, prefix="/api", tags=["metadata"])
 

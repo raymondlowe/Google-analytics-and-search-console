@@ -204,33 +204,53 @@ class Dashboard {
     async executeQuery() {
         const query = this.buildQuery();
         if (!query) return;
-        
         try {
             this.showLoading();
             this.clearResults();
-            
             const response = await fetch('/api/query', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(query)
             });
-            
             if (!response.ok) {
                 throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             }
-            
             const result = await response.json();
             this.currentQueryId = result.query_id;
-            
             this.showStatus(`Query ${result.query_id} started`, 'info');
-            
-            // Start polling for results
+            // Try websocket for progress
+            this.startProgressWebSocket(result.query_id);
+            // Start polling for results (fallback for completion)
             this.pollForResults();
-            
         } catch (error) {
             console.error('Error executing query:', error);
             this.showStatus(`Error executing query: ${error.message}`, 'error');
             this.hideLoading();
+        }
+    }
+    startProgressWebSocket(queryId) {
+        if (!queryId) return;
+        const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + `/api/query/${queryId}/progress`;
+        try {
+            this.progressSocket = new WebSocket(wsUrl);
+            this.progressSocket.onmessage = (event) => {
+                try {
+                    const progress = JSON.parse(event.data);
+                    this.updateProgress(progress);
+                } catch (e) {
+                    // Ignore parse errors
+                }
+            };
+            this.progressSocket.onerror = () => {
+                // Fallback to polling only
+                this.progressSocket = null;
+            };
+            this.progressSocket.onclose = () => {
+                this.progressSocket = null;
+            };
+        } catch (e) {
+            // Fallback to polling only
+            this.progressSocket = null;
         }
     }
     
@@ -542,14 +562,17 @@ class Dashboard {
         document.getElementById('resultsInfo').textContent = '';
         document.getElementById('exportButtons').style.display = 'none';
         this.currentQueryId = null;
-        
         // Clear progress and cancel button
         this.hideProgress();
         this.hideCancelButton();
-        
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
+        }
+        // Close websocket if open
+        if (this.progressSocket) {
+            try { this.progressSocket.close(); } catch (e) {}
+            this.progressSocket = null;
         }
     }
     
