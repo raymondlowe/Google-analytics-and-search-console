@@ -157,8 +157,7 @@ def get_default_presets() -> List[PresetQuery]:
                 sources=["ga4"],
                 dimensions=["pagePath", "hostname"],
                 metrics=["screenPageViews", "totalAdRevenue", "sessions"],
-                sort=[{"field": "totalAdRevenue", "order": "desc"}],
-                limit=100
+                sort=[{"field": "totalAdRevenue", "order": "desc"}]
             )
         ),
         PresetQuery(
@@ -172,8 +171,7 @@ def get_default_presets() -> List[PresetQuery]:
                 sources=["gsc"],
                 dimensions=["page", "query"],
                 metrics=["impressions", "position", "clicks", "ctr"],
-                sort=[{"field": "impressions", "order": "desc"}],
-                limit=100
+                sort=[{"field": "impressions", "order": "desc"}]
             )
         ),
         PresetQuery(
@@ -187,8 +185,7 @@ def get_default_presets() -> List[PresetQuery]:
                 sources=["ga4", "gsc"],
                 dimensions=["pagePath", "page"],
                 metrics=["screenPageViews", "sessions", "impressions", "clicks"],
-                sort=[{"field": "screenPageViews", "order": "desc"}],
-                limit=50
+                sort=[{"field": "screenPageViews", "order": "desc"}]
             )
         ),
         PresetQuery(
@@ -202,8 +199,7 @@ def get_default_presets() -> List[PresetQuery]:
                 sources=["ga4"],
                 dimensions=["pagePath", "deviceCategory"],
                 metrics=["screenPageViews", "sessions", "userEngagementDuration"],
-                sort=[{"field": "screenPageViews", "order": "desc"}],
-                limit=100
+                sort=[{"field": "screenPageViews", "order": "desc"}]
             )
         )
     ]
