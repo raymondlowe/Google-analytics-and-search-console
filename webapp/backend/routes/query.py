@@ -293,9 +293,15 @@ async def export_csv(query_id: str):
     # Convert to DataFrame and then CSV
     df = pd.DataFrame(data)
     csv_buffer = io.StringIO()
+    # Write parameters as # comments at the top
+    params = query_info.get("query", {})
+    for k, v in params.items():
+        csv_buffer.write(f"# {k}: {v}\n")
+    csv_buffer.write("\n")
+    # Write CSV header and data
     df.to_csv(csv_buffer, index=False)
     csv_content = csv_buffer.getvalue()
-    
+
     return StreamingResponse(
         io.StringIO(csv_content),
         media_type="text/csv",
@@ -340,8 +346,8 @@ async def export_xlsx(query_id: str):
 
         # Identify metric columns (try to get from query or infer from data)
         metric_cols = []
-        if hasattr(query_request, 'metrics') and query_request.metrics:
-            metric_cols = [col for col in df.columns if col in query_request.metrics]
+        if 'query' in query_info and query_info['query'].get('metrics'):
+            metric_cols = [col for col in df.columns if col in query_info['query']['metrics']]
         else:
             # Fallback: infer numeric columns
             metric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
@@ -360,6 +366,10 @@ async def export_xlsx(query_id: str):
                             worksheet.write_number(row_num, col_num, float(val), number_format)
                         except Exception:
                             worksheet.write(row_num, col_num, val)
+
+        # Add an 'options' tab with parameters
+        options_df = pd.DataFrame(list(query_info.get('query', {}).items()), columns=['Parameter', 'Value'])
+        options_df.to_excel(writer, sheet_name='options', index=False)
     
     output.seek(0)
     
