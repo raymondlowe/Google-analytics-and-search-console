@@ -454,13 +454,8 @@ class Dashboard {
                             // Integer formatting
                             value = value.toLocaleString();
                         } else {
-                            // Handle very small decimal numbers to avoid scientific notation
-                            if (Math.abs(value) < 0.001 && value !== 0) {
-                                // Use fixed notation for very small numbers
-                                value = value.toFixed(6).replace(/\.?0+$/, '');
-                            } else {
-                                value = value.toLocaleString(undefined, { maximumFractionDigits: 6 });
-                            }
+                            // Always use fixed-point decimal, up to 8 decimals, never e-notation
+                            value = value.toFixed(8).replace(/\.?0+$/, '');
                         }
                     }
                     td.textContent = value || '';
