@@ -32,9 +32,14 @@ def aggregate_gsc_domain_variants(results: List[Dict[str, Any]]) -> List[Dict[st
         for key in ['site', 'property', 'domain', 'siteUrl', 'propertyUrl', 'page', 'url']:
             if key in agg_row:
                 agg_row[key] = domain
-        # Sum all numeric fields
+        # Sum or average numeric fields as appropriate
         for k in agg_row:
             if isinstance(agg_row[k], (int, float)):
-                agg_row[k] = sum(float(r.get(k, 0) or 0) for r in rows)
+                if k in ("position", "ctr"):
+                    # Average, ignoring missing/nulls
+                    values = [float(r.get(k, 0)) for r in rows if r.get(k) is not None]
+                    agg_row[k] = sum(values) / len(values) if values else 0
+                else:
+                    agg_row[k] = sum(float(r.get(k, 0) or 0) for r in rows)
         aggregated.append(agg_row)
     return aggregated
