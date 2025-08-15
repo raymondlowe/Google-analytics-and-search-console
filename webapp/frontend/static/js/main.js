@@ -20,6 +20,50 @@ class Dashboard {
         // Query execution
         document.getElementById('executeQuery').addEventListener('click', () => this.executeQuery());
         document.getElementById('clearQuery').addEventListener('click', () => this.clearForm());
+
+        // Clear Cache button
+        const clearCacheBtn = document.getElementById('clearCache');
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', () => this.clearCache());
+        }
+
+        // Export buttons
+        document.getElementById('exportCSV').addEventListener('click', () => this.exportResults('csv'));
+        document.getElementById('exportExcel').addEventListener('click', () => this.exportResults('xlsx'));
+
+        // Source checkboxes
+        document.getElementById('sourceGA4').addEventListener('change', () => this.updateFormFields());
+        document.getElementById('sourceGSC').addEventListener('change', () => this.updateFormFields());
+
+        // Auth identifier change
+        document.getElementById('authIdentifier').addEventListener('change', () => this.loadProperties());
+
+        // Credentials upload
+        document.getElementById('uploadCredentialsBtn').addEventListener('click', () => this.openFileUpload());
+        document.getElementById('credentialsUpload').addEventListener('change', (e) => this.uploadCredentials(e));
+
+        // Cancel query button (will be added dynamically)
+        document.addEventListener('click', (e) => {
+            if (e.target && e.target.id === 'cancelQuery') {
+                this.cancelQuery();
+            }
+        });
+    }
+
+    async clearCache() {
+        this.showStatus('Clearing cache...', 'info');
+        try {
+            const response = await fetch('/api/cache/clear', { method: 'POST' });
+            const result = await response.json();
+            if (result.success) {
+                this.showStatus(`Cache cleared. Deleted ${result.deleted} entries.`, 'success');
+            } else {
+                this.showStatus('Failed to clear cache: ' + (result.error || 'Unknown error'), 'error');
+            }
+        } catch (err) {
+            this.showStatus('Error clearing cache: ' + err.message, 'error');
+        }
+    }
         
         // Export buttons
         document.getElementById('exportCSV').addEventListener('click', () => this.exportResults('csv'));

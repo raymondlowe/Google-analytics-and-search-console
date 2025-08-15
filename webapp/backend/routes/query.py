@@ -2,6 +2,7 @@
 Query execution routes
 """
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi.responses import JSONResponse
 from fastapi.responses import StreamingResponse
 import pandas as pd
 import io
@@ -20,12 +21,24 @@ from data_providers import DataProviderRegistry
 
 logger = logging.getLogger(__name__)
 
+
 router = APIRouter()
 
+# Global instances - will be dependency injected in production
 # Global instances - will be dependency injected in production
 cache = UnifiedCache()
 data_registry = DataProviderRegistry()
 cancel_flags: Dict[str, bool] = {}  # Track cancellation requests
+
+
+# --- Cache Management Endpoint ---
+@router.post("/cache/clear")
+async def clear_cache():
+    try:
+        deleted = cache.clear_cache()
+        return JSONResponse({"success": True, "deleted": deleted})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 async def execute_query_background(query_id: str, query_request: QueryRequest):
