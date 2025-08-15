@@ -322,12 +322,12 @@ async def export_xlsx(query_id: str):
     df = pd.DataFrame(data)
     
     with pd.ExcelWriter(output, engine='xlsxwriter') as writer:
+        # Write the dataframe as text, then overwrite metrics as numbers with formatting
         df.to_excel(writer, sheet_name='Query Results', index=False)
-        
-        # Get the workbook and worksheet
+
         workbook = writer.book
         worksheet = writer.sheets['Query Results']
-        
+
         # Add some formatting
         header_format = workbook.add_format({
             'bold': True,
@@ -336,11 +336,30 @@ async def export_xlsx(query_id: str):
             'fg_color': '#D7E4BC',
             'border': 1
         })
-        
-        # Apply header formatting
+        number_format = workbook.add_format({'num_format': '0.##########'})  # No scientific notation
+
+        # Identify metric columns (try to get from query or infer from data)
+        metric_cols = []
+        if hasattr(query_request, 'metrics') and query_request.metrics:
+            metric_cols = [col for col in df.columns if col in query_request.metrics]
+        else:
+            # Fallback: infer numeric columns
+            metric_cols = [col for col in df.columns if pd.api.types.is_numeric_dtype(df[col])]
+
+        # Apply header formatting and set column width
         for col_num, value in enumerate(df.columns.values):
             worksheet.write(0, col_num, value, header_format)
             worksheet.set_column(col_num, col_num, 15)
+
+        # Overwrite metric columns as numbers with fixed-point format
+        for col_num, col_name in enumerate(df.columns):
+            if col_name in metric_cols:
+                for row_num, val in enumerate(df[col_name], start=1):
+                    if pd.notnull(val):
+                        try:
+                            worksheet.write_number(row_num, col_num, float(val), number_format)
+                        except Exception:
+                            worksheet.write(row_num, col_num, val)
     
     output.seek(0)
     
