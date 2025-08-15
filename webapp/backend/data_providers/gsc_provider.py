@@ -157,13 +157,11 @@ class GSCProvider:
                           search_type: str = "web",
                           debug: bool = False,
                           progress_callback=None) -> pd.DataFrame:
-        """Execute GSC query using existing NewDownloads logic with optional progress reporting"""
-        
-        # Capture the main loop once so worker thread can marshal updates back
+        """Execute GSC query using existing NewDownloads logic with optional progress reporting, supporting multiple domains."""
+
         main_loop = asyncio.get_running_loop()
 
         def emit_progress(message: str, current: Optional[int] = None, total: Optional[int] = None):
-            # Print to the original stdout to avoid being captured by our own redirect
             try:
                 sys.__stdout__.write(f"Progress: {message} (current={current}, total={total})\n")
                 sys.__stdout__.flush()
@@ -174,52 +172,80 @@ class GSCProvider:
             payload: Dict[str, Any] = {"message": message}
             if current is not None and total is not None:
                 payload.update({"current": current, "total": total})
-            # Always schedule on the captured loop (safe from worker thread)
             try:
                 main_loop.call_soon_threadsafe(lambda: asyncio.create_task(progress_callback(payload)))
             except Exception:
                 pass
-        
-        def run_gsc_query():
-            """Run GSC query in thread pool"""
+
+        async def run_gsc_queries():
             try:
                 logger.info(f"GSC Thread: Starting query for {domain_filter or 'all domains'}")
-                # Announce start
                 emit_progress("GSC: starting domain discovery...", None, None)
-                # Wire through a native progress callback from NewDownloads (no stdout redirect to avoid loops)
-                def nd_progress(payload: Dict[str, Any]):
-                    msg = payload.get("message") or payload.get("event", "progress")
-                    emit_progress(f"GSC: {msg}", payload.get("current"), payload.get("total"))
 
-                df = _ND.fetch_search_console_data(
-                    start_date=start_date,
-                    end_date=end_date,
-                    search_type=search_type,
-                    dimensions=",".join(dimensions),
-                    google_account=auth_identifier,
-                    wait_seconds=2,  # Conservative wait time
-                    debug=debug,
-                    domain_filter=domain_filter[0] if domain_filter and len(domain_filter) == 1 else None,
-                    max_retries=3,
-                    retry_delay=5,
-                    progress_callback=nd_progress
-                )
-                emit_progress("GSC: finished fetching data", 1, 1)
+                # If no domains selected, fetch all
+                if not domain_filter or len(domain_filter) == 0:
+                    def nd_progress(payload: Dict[str, Any]):
+                        msg = payload.get("message") or payload.get("event", "progress")
+                        emit_progress(f"GSC: {msg}", payload.get("current"), payload.get("total"))
+                    df = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: _ND.fetch_search_console_data(
+                            start_date=start_date,
+                            end_date=end_date,
+                            search_type=search_type,
+                            dimensions=",".join(dimensions),
+                            google_account=auth_identifier,
+                            wait_seconds=2,
+                            debug=debug,
+                            domain_filter=None,
+                            max_retries=3,
+                            retry_delay=5,
+                            progress_callback=nd_progress
+                        )
+                    )
+                    emit_progress("GSC: finished fetching data", 1, 1)
+                    logger.info(f"GSC Thread: Query finished. Rows: {len(df) if df is not None else 0}")
+                    return df if df is not None else pd.DataFrame()
 
-                logger.info(f"GSC Thread: Query finished. Rows: {len(df) if df is not None else 0}")
-                return df if df is not None else pd.DataFrame()
+                # If one or more domains selected, fetch for each and concatenate
+                all_dfs = []
+                total = len(domain_filter)
+                for idx, domain in enumerate(domain_filter):
+                    def nd_progress(payload: Dict[str, Any]):
+                        msg = payload.get("message") or payload.get("event", "progress")
+                        emit_progress(f"GSC: [{idx+1}/{total}] {msg}", payload.get("current"), payload.get("total"))
+                    df = await asyncio.get_event_loop().run_in_executor(
+                        None,
+                        lambda: _ND.fetch_search_console_data(
+                            start_date=start_date,
+                            end_date=end_date,
+                            search_type=search_type,
+                            dimensions=",".join(dimensions),
+                            google_account=auth_identifier,
+                            wait_seconds=2,
+                            debug=debug,
+                            domain_filter=domain,
+                            max_retries=3,
+                            retry_delay=5,
+                            progress_callback=nd_progress
+                        )
+                    )
+                    if df is not None and not df.empty:
+                        all_dfs.append(df)
+                if all_dfs:
+                    result_df = pd.concat(all_dfs, ignore_index=True)
+                else:
+                    result_df = pd.DataFrame()
+                emit_progress("GSC: finished fetching data for all selected domains", 1, 1)
+                logger.info(f"GSC Thread: Multi-domain query finished. Rows: {len(result_df) if result_df is not None else 0}")
+                return result_df
             except Exception as e:
                 logger.error(f"GSC Thread: Exception during query execution: {e}", exc_info=True)
                 emit_progress(f"GSC: Error - {e}", 1, 1)
                 return pd.DataFrame()
-        
-        # Run in thread pool to avoid blocking
+
         try:
-            loop = asyncio.get_event_loop()
-            df = await loop.run_in_executor(
-                None,  # Use default executor
-                run_gsc_query
-            )
+            df = await run_gsc_queries()
             return df if df is not None else pd.DataFrame()
         except Exception as e:
             logger.error(f"Error executing GSC query: {e}", exc_info=True)

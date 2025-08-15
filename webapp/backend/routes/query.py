@@ -295,8 +295,11 @@ async def export_csv(query_id: str):
     csv_buffer = io.StringIO()
     # Write parameters as # comments at the top
     params = query_info.get("query", {})
-    for k, v in params.items():
-        csv_buffer.write(f"# {k}: {v}\n")
+    if params:
+        for k, v in params.items():
+            csv_buffer.write(f"# {k}: {v}\n")
+    else:
+        csv_buffer.write("# No query parameters available\n")
     csv_buffer.write("\n")
     # Write CSV header and data
     df.to_csv(csv_buffer, index=False)
@@ -368,7 +371,11 @@ async def export_xlsx(query_id: str):
                             worksheet.write(row_num, col_num, val)
 
         # Add an 'options' tab with parameters
-        options_df = pd.DataFrame(list(query_info.get('query', {}).items()), columns=['Parameter', 'Value'])
+        params = query_info.get('query', {})
+        if params:
+            options_df = pd.DataFrame(list(params.items()), columns=['Parameter', 'Value'])
+        else:
+            options_df = pd.DataFrame([['No query parameters available', '']], columns=['Parameter', 'Value'])
         options_df.to_excel(writer, sheet_name='options', index=False)
     
     output.seek(0)
