@@ -192,6 +192,8 @@ input:focus, select:focus {
     margin-top: 20px;
     display: flex;
     gap: 10px;
+    flex-wrap: wrap;
+    margin-bottom: 20px; /* Add space below buttons to prevent overlap */
 }
 
 .btn {

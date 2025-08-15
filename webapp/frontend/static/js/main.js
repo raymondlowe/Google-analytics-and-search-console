@@ -15,41 +15,8 @@ class Dashboard {
         await this.loadMetadata();
         this.updateFormFields();
     }
+
     
-    setupEventListeners() {
-        // Query execution
-        document.getElementById('executeQuery').addEventListener('click', () => this.executeQuery());
-        document.getElementById('clearQuery').addEventListener('click', () => this.clearForm());
-
-        // Clear Cache button
-        const clearCacheBtn = document.getElementById('clearCache');
-        if (clearCacheBtn) {
-            clearCacheBtn.addEventListener('click', () => this.clearCache());
-        }
-
-        // Export buttons
-        document.getElementById('exportCSV').addEventListener('click', () => this.exportResults('csv'));
-        document.getElementById('exportExcel').addEventListener('click', () => this.exportResults('xlsx'));
-
-        // Source checkboxes
-        document.getElementById('sourceGA4').addEventListener('change', () => this.updateFormFields());
-        document.getElementById('sourceGSC').addEventListener('change', () => this.updateFormFields());
-
-        // Auth identifier change
-        document.getElementById('authIdentifier').addEventListener('change', () => this.loadProperties());
-
-        // Credentials upload
-        document.getElementById('uploadCredentialsBtn').addEventListener('click', () => this.openFileUpload());
-        document.getElementById('credentialsUpload').addEventListener('change', (e) => this.uploadCredentials(e));
-
-        // Cancel query button (will be added dynamically)
-        document.addEventListener('click', (e) => {
-            if (e.target && e.target.id === 'cancelQuery') {
-                this.cancelQuery();
-            }
-        });
-    }
-
     async clearCache() {
         this.showStatus('Clearing cache...', 'info');
         try {
@@ -64,7 +31,18 @@ class Dashboard {
             this.showStatus('Error clearing cache: ' + err.message, 'error');
         }
     }
-        
+    
+    setupEventListeners() {
+        // Query execution
+        document.getElementById('executeQuery').addEventListener('click', () => this.executeQuery());
+        document.getElementById('clearQuery').addEventListener('click', () => this.clearForm());
+
+        // Clear Cache button
+        const clearCacheBtn = document.getElementById('clearCache');
+        if (clearCacheBtn) {
+            clearCacheBtn.addEventListener('click', () => this.clearCache());
+        }
+
         // Export buttons
         document.getElementById('exportCSV').addEventListener('click', () => this.exportResults('csv'));
         document.getElementById('exportExcel').addEventListener('click', () => this.exportResults('xlsx'));
@@ -351,50 +329,50 @@ class Dashboard {
     
     async pollForResults() {
         if (!this.currentQueryId) return;
-        
+
         this.pollInterval = setInterval(async () => {
             try {
                 const response = await fetch(`/api/query/${this.currentQueryId}`);
-                
+
                 if (!response.ok) {
                     throw new Error(`HTTP ${response.status}: ${response.statusText}`);
                 }
-                
+
                 const result = await response.json();
-                
+
                 // Update progress indicator
                 if (result.progress) {
                     this.updateProgress(result.progress);
                 }
-                
+
                 if (result.status === 'completed') {
                     clearInterval(this.pollInterval);
                     this.hideLoading();
-                    this.displayResults(result);
-                    
+                    // Instead of displaying the first page, load all results by default
+                    await this.loadAllResults();
                     const cacheStatus = result.cache_hit ? ' (cached)' : '';
                     this.showStatus(
                         `Query completed: ${result.row_count} rows in ${Math.round(result.execution_time_ms)}ms${cacheStatus}`,
                         'success'
                     );
-                    
+
                 } else if (result.status === 'failed') {
                     clearInterval(this.pollInterval);
                     this.hideLoading();
                     this.showStatus(`Query failed: ${result.error}`, 'error');
-                    
+
                 } else if (result.status === 'cancelled') {
                     clearInterval(this.pollInterval);
                     this.hideLoading();
                     this.showStatus('Query was cancelled', 'info');
-                    
+
                 } else if (result.status === 'running' || result.status === 'queued') {
                     // Show cancel button if cancellation is supported
                     if (result.can_cancel) {
                         this.showCancelButton();
                     }
                 }
-                
+
             } catch (error) {
                 console.error('Error polling for results:', error);
                 clearInterval(this.pollInterval);
