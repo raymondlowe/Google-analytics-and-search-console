@@ -145,8 +145,8 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
                         # Handle mixed types or non-comparable values
                         results.sort(key=lambda x: str(x.get(field, "")), reverse=reverse)
         
-        # Apply limit if specified
-        if query_request.limit and query_request.limit > 0:
+        # Apply limit only if explicitly specified and not None/0
+        if getattr(query_request, 'limit', None) and query_request.limit > 0:
             original_count = len(results)
             results = results[:query_request.limit]
             if original_count > query_request.limit:
