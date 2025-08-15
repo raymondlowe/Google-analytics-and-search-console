@@ -13,6 +13,7 @@ from typing import Dict, Any, Optional
 import json
 import xlsxwriter
 
+from shared_state import active_queries, progress_websockets
 from core.query_models import QueryRequest, QueryResponse, PaginatedResponse
 from core.cache import UnifiedCache
 from data_providers import DataProviderRegistry
@@ -24,16 +25,18 @@ router = APIRouter()
 # Global instances - will be dependency injected in production
 cache = UnifiedCache()
 data_registry = DataProviderRegistry()
-active_queries: Dict[str, Dict[str, Any]] = {}
 cancel_flags: Dict[str, bool] = {}  # Track cancellation requests
 
 
 async def execute_query_background(query_id: str, query_request: QueryRequest):
     """Background task to execute query with progress tracking and cancellation support"""
     start_time = time.time()
-    
+
+    # Use a consistent logger prefix
+    log_prefix = f"Query {query_id[:8]}:"
+
     # Log query start with details
-    logger.info(f"Starting query {query_id[:8]}... - Sources: {query_request.sources}, "
+    logger.info(f"{log_prefix} Starting query - Sources: {query_request.sources}, "
                 f"Date range: {query_request.start_date} to {query_request.end_date}, "
                 f"Dimensions: {query_request.dimensions}, Metrics: {query_request.metrics}")
     
@@ -44,28 +47,27 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             "progress": {"current": 0, "total": 3, "message": "Initializing query..."},
             "can_cancel": True
         })
+        logger.info(f"{log_prefix} Initializing query...")
         await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Initializing query...")
         
         # Check for cancellation
         if cancel_flags.get(query_id, False):
             active_queries[query_id]["status"] = "cancelled"
+            logger.info(f"{log_prefix} Cancelled before starting.")
             await broadcast_progress(query_id)
-            print(f"[PROGRESS] Query {query_id[:8]}... Cancelled")
             return
         
         # Step 1: Check cache
-        logger.info(f"Query {query_id[:8]}... - Checking cache...")
+        logger.info(f"{log_prefix} Checking cache...")
         active_queries[query_id]["progress"] = {"current": 1, "total": 3, "message": "Checking cache..."}
         await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Checking cache...")
         query_data = query_request.dict()
         cached_result = cache.get_cached_query(query_data, ttl_seconds=3600)
         
         if cached_result and not query_request.debug:
             # Cache hit
             execution_time = (time.time() - start_time) * 1000
-            logger.info(f"Query {query_id[:8]}... - Cache hit! Returning {len(cached_result['data'])} rows in {execution_time:.1f}ms")
+            logger.info(f"{log_prefix} Cache hit! Returning {len(cached_result['data'])} rows in {execution_time:.1f}ms")
             active_queries[query_id].update({
                 "status": "completed",
                 "data": cached_result["data"],
@@ -77,28 +79,31 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
                 "can_cancel": False
             })
             await broadcast_progress(query_id)
-            print(f"[PROGRESS] Query {query_id[:8]}... Completed (cache hit)")
             cache.log_query(query_data, execution_time, True, len(cached_result["data"]))
             return
         
         # Check for cancellation
         if cancel_flags.get(query_id, False):
             active_queries[query_id]["status"] = "cancelled"
+            logger.info(f"{log_prefix} Cancelled after cache check.")
             await broadcast_progress(query_id)
-            print(f"[PROGRESS] Query {query_id[:8]}... Cancelled")
             return
         
         # Step 2: Execute fresh query
-        logger.info(f"Query {query_id[:8]}... - Executing fresh query on {', '.join(query_request.sources)} data sources...")
+        logger.info(f"{log_prefix} Executing fresh query on {', '.join(query_request.sources)} data sources...")
         active_queries[query_id]["progress"] = {"current": 2, "total": 3, "message": f"Querying {', '.join(query_request.sources)} data..."}
         await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Querying {', '.join(query_request.sources)} data...")
         
         # Create progress callback for more granular updates
         async def progress_update(progress_info):
-            active_queries[query_id]["progress"] = progress_info
+            # Ensure current/total always present; default to stage 2/3
+            existing = active_queries.get(query_id, {}).get("progress", {"current": 2, "total": 3})
+            current = progress_info.get("current", existing.get("current", 2))
+            total = progress_info.get("total", existing.get("total", 3))
+            message = progress_info.get("message", existing.get("message", "Querying..."))
+            active_queries[query_id]["progress"] = {"current": current, "total": total, "message": message}
+            logger.info(f"{log_prefix} Sub-progress: {message}")
             await broadcast_progress(query_id)
-            print(f"[PROGRESS] Query {query_id[:8]}... {progress_info['message']}")
         
         results = await data_registry.execute_unified_query(
             start_date=query_request.start_date.isoformat(),
@@ -113,26 +118,23 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             progress_callback=progress_update
         )
         
-        logger.info(f"Query {query_id[:8]}... - Raw query returned {len(results) if results else 0} rows")
-        await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Raw query returned {len(results) if results else 0} rows")
+        logger.info(f"{log_prefix} Raw query returned {len(results) if results else 0} rows")
         
         # Check for cancellation after query execution
         if cancel_flags.get(query_id, False):
             active_queries[query_id]["status"] = "cancelled"
+            logger.info(f"{log_prefix} Cancelled after data retrieval.")
             await broadcast_progress(query_id)
-            print(f"[PROGRESS] Query {query_id[:8]}... Cancelled")
             return
         
         # Step 3: Process results
-        logger.info(f"Query {query_id[:8]}... - Processing and formatting results...")
+        logger.info(f"{log_prefix} Processing and formatting results...")
         active_queries[query_id]["progress"] = {"current": 3, "total": 3, "message": "Processing results..."}
         await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Processing results...")
         
         # Apply sorting if specified
         if query_request.sort and results:
-            logger.info(f"Query {query_id[:8]}... - Applying sorting: {query_request.sort}")
+            logger.info(f"{log_prefix} Applying sorting: {query_request.sort}")
             for sort_spec in reversed(query_request.sort):
                 field = sort_spec.get("field")
                 reverse = sort_spec.get("order", "asc").lower() == "desc"
@@ -148,14 +150,12 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             original_count = len(results)
             results = results[:query_request.limit]
             if original_count > query_request.limit:
-                logger.info(f"Query {query_id[:8]}... - Limited results from {original_count} to {query_request.limit} rows")
+                logger.info(f"{log_prefix} Limited results from {original_count} to {query_request.limit} rows")
         
         execution_time = (time.time() - start_time) * 1000
         
-        logger.info(f"Query {query_id[:8]}... - Completed successfully! "
+        logger.info(f"{log_prefix} Completed successfully! "
                    f"Returned {len(results)} rows in {execution_time:.1f}ms")
-        await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Completed successfully! Returned {len(results)} rows in {execution_time:.1f}ms")
         
         # Update query status
         active_queries[query_id].update({
@@ -168,8 +168,8 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             "progress": {"current": 3, "total": 3, "message": "Completed"},
             "can_cancel": False
         })
+        logger.info(f"{log_prefix} Final progress update.")
         await broadcast_progress(query_id)
-        print(f"[PROGRESS] Query {query_id[:8]}... Final progress sent.")
         
         # Cache the result
         cache_data = {"data": results, "row_count": len(results)}
@@ -177,8 +177,7 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
         cache.log_query(query_data, execution_time, False, len(results))
     except Exception as e:
         execution_time = (time.time() - start_time) * 1000
-        logger.error(f"Query {query_id[:8]}... - FAILED after {execution_time:.1f}ms: {str(e)}")
-        logger.error(f"Query {query_id[:8]}... - Error details: {type(e).__name__}: {str(e)}")
+        logger.error(f"{log_prefix} FAILED after {execution_time:.1f}ms: {str(e)}", exc_info=True)
         active_queries[query_id].update({
             "status": "failed",
             "error": str(e),
@@ -186,6 +185,7 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
             "can_cancel": False,
             "progress": {"current": 3, "total": 3, "message": f"Failed: {str(e)}"}
         })
+        await broadcast_progress(query_id)
     finally:
         # Clean up cancellation flag
         cancel_flags.pop(query_id, None)
@@ -193,14 +193,24 @@ async def execute_query_background(query_id: str, query_request: QueryRequest):
 # --- Place broadcast_progress OUTSIDE the function ---
 async def broadcast_progress(query_id: str):
     """Send progress update to websocket client if connected"""
-    from webapp.backend.app import progress_websockets, active_queries
+    log_prefix = f"Query {query_id[:8]}:"
+    logger.debug(f"{log_prefix} Attempting to broadcast progress.")
     progress = active_queries.get(query_id, {}).get("progress")
     ws = progress_websockets.get(query_id)
     if ws and progress:
+        logger.info(f"{log_prefix} Broadcasting progress via WebSocket: {progress}")
         try:
             await ws.send_json(progress)
+            logger.debug(f"{log_prefix} WebSocket send successful.")
         except Exception as e:
-            print(f"[PROGRESS] WebSocket send error for query {query_id}: {e}")
+            logger.error(f"{log_prefix} WebSocket send error: {e}", exc_info=True)
+            # Optional: remove broken websocket connection
+            progress_websockets.pop(query_id, None)
+            logger.warning(f"{log_prefix} Removed broken WebSocket connection.")
+    elif not ws:
+        logger.debug(f"{log_prefix} No active WebSocket found for this query ID.")
+    elif not progress:
+        logger.debug(f"{log_prefix} No progress data to broadcast.")
 
 
 @router.post("/query", response_model=QueryResponse)
@@ -217,8 +227,9 @@ async def create_query(query_request: QueryRequest, background_tasks: Background
         "query": query_request.dict()
     }
     
-    # Start background execution
-    background_tasks.add_task(execute_query_background, query_id, query_request)
+    # Start background execution using asyncio task to ensure async function runs
+    asyncio.create_task(execute_query_background(query_id, query_request))
+    logger.debug(f"Scheduled background task for query {query_id[:8]}")
     
     return QueryResponse(
         query_id=query_id,
@@ -230,10 +241,13 @@ async def create_query(query_request: QueryRequest, background_tasks: Background
 @router.get("/query/{query_id}", response_model=QueryResponse)
 async def get_query_status(query_id: str):
     """Get query status and results"""
+    logger.debug(f"GET /api/query/{query_id} called")
     if query_id not in active_queries:
+        logger.debug(f"Query {query_id} not found")
         raise HTTPException(status_code=404, detail="Query not found")
     
     query_info = active_queries[query_id]
+    logger.debug(f"Returning status for {query_id}: {query_info.get('status')} with progress {query_info.get('progress')}")
     
     return QueryResponse(
         query_id=query_id,

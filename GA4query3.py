@@ -474,10 +474,95 @@ def list_properties(account, debug=False):
 
         properties_df = pd.DataFrame(all_properties)
         return properties_df
-
     except Exception as api_error:
         print(f"GA4 Admin API Error listing properties: {api_error}")
         return None
+
+
+def fetch_ga4_data_serial(
+    start_date: str,
+    end_date: str,
+    dimensions: str,
+    metrics: str,
+    account: str = "",
+    property_ids: list | None = None,
+    filters: dict | None = None,
+    debug: bool = False,
+    progress_callback=None,
+):
+    """Sequential GA4 fetch across properties with optional progress callback.
+
+    Emits structured progress payloads: start, property_start, property_done, finish.
+    """
+    # List properties if not provided
+    if not property_ids:
+        if progress_callback:
+            try:
+                progress_callback({"event": "start", "message": "Listing GA4 properties"})
+            except Exception:
+                pass
+        props_df = list_properties(account, debug=debug)
+        if props_df is None or props_df.empty:
+            if progress_callback:
+                try:
+                    progress_callback({"event": "finish", "message": "No GA4 properties found", "current": 0, "total": 0, "rows": 0})
+                except Exception:
+                    pass
+            return pd.DataFrame()
+        property_ids = [str(r['property_id']) for _, r in props_df.iterrows()]
+        prop_names = {str(r['property_id']): str(r['property_name']) for _, r in props_df.iterrows()}
+    else:
+        prop_names = {pid: f"Property_{pid}" for pid in property_ids}
+
+    total = len(property_ids)
+    completed = 0
+    if progress_callback:
+        try:
+            progress_callback({"event": "start", "message": f"Starting GA4 fetch for {total} propertie(s)", "current": 0, "total": total})
+        except Exception:
+            pass
+
+    combined = pd.DataFrame()
+    for pid in property_ids:
+        pname = prop_names.get(pid, pid)
+        if progress_callback:
+            try:
+                progress_callback({"event": "property_start", "message": f"Querying {pname} ({pid})", "property_id": pid, "property_name": pname})
+            except Exception:
+                pass
+
+        df = produce_report(
+            start_date=start_date,
+            end_date=end_date,
+            property_id=pid,
+            property_name=pname,
+            account=account,
+            filter_expression=(filters or {}).get("expression"),
+            dimensions=dimensions,
+            metrics=metrics,
+            debug=debug,
+        )
+        if df is not None and not df.empty:
+            df['property_id'] = pid
+            df['property_name'] = pname
+            combined = pd.concat([combined, df], ignore_index=True)
+
+        completed += 1
+        if progress_callback:
+            try:
+                msg = f"Completed {pname} ({pid})"
+                progress_callback({"event": "property_done", "message": msg, "property_id": pid, "property_name": pname, "current": completed, "total": total})
+            except Exception:
+                pass
+
+    if not combined.empty:
+        combined.reset_index(drop=True, inplace=True)
+    if progress_callback:
+        try:
+            progress_callback({"event": "finish", "message": "Finished GA4 fetch", "current": completed, "total": total, "rows": len(combined)})
+        except Exception:
+            pass
+    return combined
 
 def generate_date_ranges(start_month_year, end_month_year):
     """Generates a list of date ranges from the 1st to the 28th of each month

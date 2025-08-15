@@ -78,7 +78,9 @@ class DataProviderRegistry:
                         property_ids=property_ids,
                         auth_identifier=auth_identifier,
                         filters=filters,
-                        debug=debug
+                        debug=debug,
+                        # pass through optional progress callback
+                        progress_callback=progress_callback,
                     )
                     normalized_data = provider.normalize_data(df)
                     all_results.extend(normalized_data)
@@ -99,7 +101,9 @@ class DataProviderRegistry:
                         dimensions=gsc_dimensions,
                         domain_filter=properties,
                         auth_identifier=auth_identifier,
-                        debug=debug
+                        debug=debug,
+                        # pass through optional progress callback
+                        progress_callback=progress_callback,
                     )
                     normalized_data = provider.normalize_data(df)
                     gsc_results.extend(normalized_data)

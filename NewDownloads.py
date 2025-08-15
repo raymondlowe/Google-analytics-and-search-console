@@ -443,7 +443,7 @@ def get_current_date():
 
 
 @persistent_cache(expire_time=86400*7)  # Cache for 7 days since domain lists rarely change
-def list_search_console_sites(google_account="", debug=False, use_cache=True, extra_auth_flags=None):
+def list_search_console_sites(google_account="", debug=False, use_cache=True, extra_auth_flags=None, include_all_domains=False):
     """
     List all available Google Search Console sites/domains for the authenticated account.
     
@@ -510,6 +510,10 @@ def list_search_console_sites(google_account="", debug=False, use_cache=True, ex
                     # Parse the hostname - handle both URL-prefix and domain properties
                     site_url = item['siteUrl']
                     
+                    if not include_all_domains:
+                        # Only include https://www. domains
+                        if not site_url.startswith('https://www.'):
+                            continue
                     if site_url.startswith('sc-domain:'):
                         # GSC Domain property (e.g., "sc-domain:example.com")
                         root_domain = site_url[10:]  # Remove "sc-domain:" prefix
@@ -561,7 +565,9 @@ async def fetch_search_console_data_async(
     domain_filter=None,
     max_retries=3,
     retry_delay=5,
-    extra_auth_flags=None
+    extra_auth_flags=None,
+    progress_callback=None,
+    include_all_domains=False
 ):
     """
     Async version of fetch_search_console_data with performance optimizations.
@@ -593,9 +599,14 @@ async def fetch_search_console_data_async(
         print(f"  Domain cache stats: {cache_stats}")
     
     # Get cached domain list instead of making API calls every time
-    sites_df = await asyncio.to_thread(list_search_console_sites, google_account, debug, True, extra_auth_flags)
+    sites_df = await asyncio.to_thread(list_search_console_sites, google_account, debug, True, extra_auth_flags, include_all_domains)
     
     if sites_df is None or sites_df.empty:
+        if progress_callback:
+            try:
+                progress_callback({"event": "finish", "message": "No sites available", "current": 0, "total": 0, "rows": 0})
+            except Exception:
+                pass
         if debug:
             print("No sites found")
         return pd.DataFrame()
@@ -604,83 +615,122 @@ async def fetch_search_console_data_async(
     if domain_filter:
         if debug:
             print(f"[DEBUG] Filtering sites for domain_filter: {domain_filter}")
-        # Accept both full URLs and domains for filtering
-        filter_domain = domain_filter.lower().strip()
-        # If filter_domain is a URL, extract the hostname
+        filt = domain_filter.lower().strip()
         try:
-            parsed = urlparse(filter_domain)
+            parsed = urlparse(filt)
             if parsed.hostname:
-                filter_domain = parsed.hostname
+                filt = parsed.hostname
         except Exception:
             pass
-        if filter_domain.startswith('www.'):
-            filter_domain = filter_domain[4:]
+        if filt.startswith('www.'):
+            filt = filt[4:]
 
-        def matches_domain(row):
+        def _matches(row):
             site_url = row['siteUrl']
             if site_url.startswith('sc-domain:'):
-                current_domain = site_url[10:].lower()
+                cur = site_url[10:].lower()
             else:
                 parsed = urlparse(site_url)
-                current_domain = parsed.hostname.lower() if parsed.hostname else ''
-            if current_domain.startswith('www.'):
-                current_domain = current_domain[4:]
-            return current_domain == filter_domain
-        
-        filtered_sites = sites_df[sites_df.apply(matches_domain, axis=1)]
+                cur = (parsed.hostname or '').lower()
+            if cur.startswith('www.'):
+                cur = cur[4:]
+            return cur == filt
 
+        sites_df = sites_df[sites_df.apply(_matches, axis=1)]
         if debug:
-            print(f"[DEBUG] Filtered {len(sites_df)} sites to {len(filtered_sites)} matching domain '{domain_filter}'")
-
-        # Always prefer https://www. version if available
-        if len(filtered_sites) > 1:
-            https_www_sites = filtered_sites[filtered_sites['siteUrl'].str.startswith('https://www.')]
-            if not https_www_sites.empty:
-                if debug:
-                    print(f"[DEBUG] Returning only https://www. version(s) for domain '{filter_domain}'")
-                filtered_sites = https_www_sites
-
-        sites_df = filtered_sites
+            print(f"[DEBUG] Filtered {len(sites_df)} sites to {len(sites_df)} matching domain '{domain_filter}'")
     
     if sites_df.empty:
+        if progress_callback:
+            try:
+                progress_callback({"event": "finish", "message": "No sites match domain filter", "current": 0, "total": 0, "rows": 0})
+            except Exception:
+                pass
         if debug:
             print(f"[DEBUG] No sites match domain filter: {domain_filter}")
         return pd.DataFrame()
     
-    # Group sites by account for concurrent processing
-    sites_by_account = sites_df.groupby('account')
-    
-    if debug:
-        print(f"[DEBUG] Processing {len(sites_df)} sites across {len(sites_by_account)} accounts")
-    
-    # Process accounts concurrently
-    account_tasks = []
-    for account, account_sites in sites_by_account:
-        task = _process_account_sites_async(
-            account, account_sites, start_date, end_date, search_type, 
-            dimensions_array, multi_dimension, wait_seconds, debug, 
-            max_retries, retry_delay, extra_auth_flags
-        )
-        account_tasks.append(task)
-    
-    # Wait for all accounts to complete
-    account_results = await asyncio.gather(*account_tasks, return_exceptions=True)
-    
-    # Combine results
+    # Progress: start
+    total_sites = len(sites_df)
+    completed = 0
+    if progress_callback:
+        try:
+            progress_callback({"event": "start", "message": f"Starting GSC fetch for {total_sites} site(s)", "current": 0, "total": total_sites})
+        except Exception:
+            pass
+
     combined_df = pd.DataFrame()
-    for result in account_results:
-        if isinstance(result, Exception):
-            if debug:
-                print(f"Account processing failed: {result}")
-            continue
-        if result is not None and not result.empty:
-            combined_df = pd.concat([combined_df, result], sort=True)
-    
-    if len(combined_df) > 0:
+    for account, account_sites in sites_df.groupby('account'):
+        client_secrets_path = get_client_secrets_path()
+        service = await asyncio.to_thread(get_service, 'webmasters', 'v3', ['https://www.googleapis.com/auth/webmasters.readonly'], client_secrets_path, account, extra_auth_flags)
+        for _, site_row in account_sites.iterrows():
+            site_url = site_row['siteUrl']
+            root_domain = site_row['domain']
+            if progress_callback:
+                try:
+                    progress_callback({"event": "site_start", "message": f"Querying {site_url}", "siteUrl": site_url, "rootDomain": root_domain, "current": completed, "total": total_sites})
+                except Exception:
+                    pass
+            # Serial, per-site execution with robust retry/error handling
+            dims = dimensions_array
+            attempt = 0
+            site_df = pd.DataFrame()
+            while attempt <= max_retries:
+                try:
+                    if attempt > 0:
+                        backoff_delay = retry_delay * (2 ** (attempt - 1))
+                        if debug:
+                            print(f"Retrying {site_url} (attempt {attempt}/{max_retries}) after {backoff_delay}s delay")
+                        await asyncio.sleep(backoff_delay)
+                    results = await asyncio.to_thread(
+                        lambda: service.searchanalytics().query(
+                            siteUrl=site_url,
+                            body={
+                                'startDate': start_date,
+                                'endDate': end_date,
+                                'dimensions': dims,
+                                'searchType': search_type,
+                                'rowLimit': 25000,
+                            },
+                        ).execute()
+                    )
+                    if results and 'rows' in results and results['rows']:
+                        site_df = pd.DataFrame(results['rows'])
+                        site_df.insert(0, 'siteUrl', site_url)
+                        site_df.insert(0, 'rootDomain', root_domain)
+                    break
+                except Exception as e:
+                    attempt += 1
+                    error_str = str(e).lower()
+                    should_retry = (attempt <= max_retries and 
+                                  ('rate' in error_str or 'quota' in error_str or 
+                                   'timeout' in error_str or 'internal error' in error_str or
+                                   '500' in error_str or '503' in error_str or '429' in error_str))
+                    if should_retry:
+                        if debug:
+                            print(f"Retryable error for {site_url} (attempt {attempt}/{max_retries + 1}): {str(e)}")
+                        continue
+                    else:
+                        if debug:
+                            print(f"Final error for {site_url}: {str(e)}")
+                        break
+            if not site_df.empty:
+                combined_df = pd.concat([combined_df, site_df], sort=True)
+            completed += 1
+            if progress_callback:
+                try:
+                    msg = f"Completed {site_url}" if not site_df.empty else f"No data for {site_url}"
+                    progress_callback({"event": "site_done", "message": msg, "siteUrl": site_url, "rootDomain": root_domain, "current": completed, "total": total_sites})
+                except Exception:
+                    pass
+
+    if not combined_df.empty:
         combined_df.reset_index(drop=True, inplace=True)
-        if debug:
-            print(f"[DEBUG] Successfully retrieved {len(combined_df)} rows total")
-    
+    if progress_callback:
+        try:
+            progress_callback({"event": "finish", "message": "Finished GSC fetch", "current": completed, "total": total_sites, "rows": len(combined_df)})
+        except Exception:
+            pass
     return combined_df
 
 
@@ -836,7 +886,8 @@ def fetch_search_console_data(
     domain_filter=None,
     max_retries=3,
     retry_delay=5,
-    extra_auth_flags=None
+    extra_auth_flags=None,
+    progress_callback=None
 ):
     """
     Synchronous wrapper for the async fetch_search_console_data_async function.
@@ -848,29 +899,20 @@ def fetch_search_console_data(
         print("Using optimized GSC data fetcher (async version)")
     
     try:
-        # Try to get the current event loop
         loop = asyncio.get_running_loop()
-        # If we're already in an async context, create a new thread to run the async function
-        # This prevents "RuntimeError: cannot be called from a running event loop"
         import concurrent.futures
-        import threading
-        
         def run_async_in_thread():
             return asyncio.run(fetch_search_console_data_async(
                 start_date, end_date, search_type, dimensions, google_account,
-                wait_seconds, debug, domain_filter, max_retries, retry_delay, extra_auth_flags
+                wait_seconds, debug, domain_filter, max_retries, retry_delay, extra_auth_flags, progress_callback
             ))
-        
-        # Run in a separate thread to avoid blocking the main event loop
         with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
             future = executor.submit(run_async_in_thread)
             return future.result()
-            
     except RuntimeError:
-        # No event loop running, we can use asyncio.run() directly
         return asyncio.run(fetch_search_console_data_async(
             start_date, end_date, search_type, dimensions, google_account,
-            wait_seconds, debug, domain_filter, max_retries, retry_delay, extra_auth_flags
+            wait_seconds, debug, domain_filter, max_retries, retry_delay, extra_auth_flags, progress_callback
         ))
 
 
@@ -1120,7 +1162,7 @@ if __name__ == "__main__":
     # Handle list domains command
     if args.list_domains:
         print("Listing available Google Search Console domains...")
-        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True, extra_auth_flags=extra_auth_flags)
+        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True, extra_auth_flags=extra_auth_flags, include_all_domains=args.include_all_domains)
         if sites_df is not None and len(sites_df) > 0:
             print("\nAvailable domains:")
             print(sites_df.to_string(index=False))
@@ -1155,9 +1197,10 @@ if __name__ == "__main__":
         domain_filter=domain_filter,
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
-        extra_auth_flags=extra_auth_flags
+        extra_auth_flags=extra_auth_flags,
+        include_all_domains=args.include_all_domains
     )
-    
+        
     # Save the data if we got any
     if len(combined_df) > 0:
         save_search_console_data(

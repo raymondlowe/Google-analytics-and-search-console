@@ -239,9 +239,7 @@ class Dashboard {
             const result = await response.json();
             this.currentQueryId = result.query_id;
             this.showStatus(`Query ${result.query_id} started`, 'info');
-            // Try websocket for progress
-            this.startProgressWebSocket(result.query_id);
-            // Start polling for results (fallback for completion)
+            // Start polling for progress/results only (WebSocket removed)
             this.pollForResults();
         } catch (error) {
             console.error('Error executing query:', error);
@@ -249,31 +247,7 @@ class Dashboard {
             this.hideLoading();
         }
     }
-    startProgressWebSocket(queryId) {
-        if (!queryId) return;
-        const wsUrl = (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host + `/api/query/${queryId}/progress`;
-        try {
-            this.progressSocket = new WebSocket(wsUrl);
-            this.progressSocket.onmessage = (event) => {
-                try {
-                    const progress = JSON.parse(event.data);
-                    this.updateProgress(progress);
-                } catch (e) {
-                    // Ignore parse errors
-                }
-            };
-            this.progressSocket.onerror = () => {
-                // Fallback to polling only
-                this.progressSocket = null;
-            };
-            this.progressSocket.onclose = () => {
-                this.progressSocket = null;
-            };
-        } catch (e) {
-            // Fallback to polling only
-            this.progressSocket = null;
-        }
-    }
+
     
     buildQuery() {
         const sources = this.getSelectedSources();
@@ -613,11 +587,6 @@ class Dashboard {
         if (this.pollInterval) {
             clearInterval(this.pollInterval);
             this.pollInterval = null;
-        }
-        // Close websocket if open
-        if (this.progressSocket) {
-            try { this.progressSocket.close(); } catch (e) {}
-            this.progressSocket = null;
         }
     }
     
