@@ -219,11 +219,12 @@ class GA4Provider:
         """Normalize GA4 DataFrame to unified format"""
         if df is None or df.empty:
             return []
-        
         # Add source information
         records = df.to_dict('records')
         for record in records:
             record['_source'] = 'ga4'
             record['_source_name'] = 'Google Analytics 4'
-        
+            # Add 'url' if both hostname and pagePath are present
+            if 'hostname' in record and 'pagePath' in record and record['hostname'] and record['pagePath']:
+                record['url'] = f"https://www.{record['hostname']}{record['pagePath']}"
         return records
