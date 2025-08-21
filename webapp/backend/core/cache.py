@@ -60,24 +60,23 @@ class UnifiedCache:
     
     def _generate_cache_key(self, query_data: Dict[str, Any]) -> str:
         """Generate a stable cache key for query data, normalizing lists and ignoring irrelevant fields."""
-        # Fields to ignore for cache key
         ignore_fields = {"debug", "can_cancel", "progress"}
-        # Normalize query dict
         norm = {}
         for k, v in query_data.items():
             if k in ignore_fields or v is None:
                 continue
-            # Sort lists for stable hashing
             if k in {"dimensions", "metrics", "sources", "properties"} and isinstance(v, list):
                 norm[k] = sorted(v)
             elif isinstance(v, list):
-                norm[k] = v[:]  # copy
+                norm[k] = v[:]
             else:
                 norm[k] = v
-        # Remove empty lists/dicts
         norm = {k: v for k, v in norm.items() if v not in ([], {}, None)}
         normalized = json.dumps(norm, sort_keys=True, default=str)
-        return hashlib.sha256(normalized.encode()).hexdigest()
+        cache_key = hashlib.sha256(normalized.encode()).hexdigest()
+        logger.info(f"[CACHE DEBUG] Normalized query for cache key: {normalized}")
+        logger.info(f"[CACHE DEBUG] Cache key: {cache_key}")
+        return cache_key
     
     def get_cached_query(self, query_data: Dict[str, Any], ttl_seconds: int = 3600) -> Optional[Dict[str, Any]]:
         """Get cached query result if available and not expired"""
@@ -195,18 +194,24 @@ class UnifiedCache:
             return {}
     
     def clear_cache(self, older_than_hours: int = None) -> int:
-        """Clear cache entries, optionally only older than specified hours"""
+        """Clear both sqlite and diskcache entries, optionally only older than specified hours (sqlite only)."""
+        deleted_count = 0
         try:
+            # Clear sqlite cache
             with sqlite3.connect(self.db_path) as conn:
                 if older_than_hours:
                     cutoff_time = time.time() - (older_than_hours * 3600)
                     cursor = conn.execute("DELETE FROM query_cache WHERE timestamp < ?", (cutoff_time,))
                 else:
                     cursor = conn.execute("DELETE FROM query_cache")
-                
                 deleted_count = cursor.rowcount
                 conn.commit()
-                return deleted_count
         except Exception as e:
-            logger.error(f"Error clearing cache: {e}")
-            return 0
+            logger.error(f"Error clearing sqlite cache: {e}")
+        try:
+            # Clear diskcache
+            self.disk_cache.clear()
+            logger.info("Diskcache cleared.")
+        except Exception as e:
+            logger.error(f"Error clearing diskcache: {e}")
+        return deleted_count
