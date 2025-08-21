@@ -1,3 +1,5 @@
+from fastapi import status
+from fastapi.responses import JSONResponse
 """
 FastAPI web application for unified GA4 and GSC dashboard
 """
@@ -146,6 +148,16 @@ async def health_check():
     }
 
 @app.post("/api/upload-credentials")
+@app.post("/api/cache/clear", response_class=JSONResponse)
+async def clear_cache_endpoint():
+    """Clear the backend cache completely."""
+    try:
+        deleted = cache.clear_cache()
+        logger.info(f"Cache cleared via API. Deleted {deleted} entries.")
+        return {"status": "success", "deleted": deleted}
+    except Exception as e:
+        logger.error(f"Error clearing cache via API: {e}")
+        return JSONResponse(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, content={"status": "error", "error": str(e)})
 async def upload_credentials(file: UploadFile = File(...)):
     """Upload Google credentials file"""
     try:

@@ -59,9 +59,24 @@ class UnifiedCache:
             conn.commit()
     
     def _generate_cache_key(self, query_data: Dict[str, Any]) -> str:
-        """Generate a stable cache key for query data"""
-        # Sort and serialize for stable hashing
-        normalized = json.dumps(query_data, sort_keys=True, default=str)
+        """Generate a stable cache key for query data, normalizing lists and ignoring irrelevant fields."""
+        # Fields to ignore for cache key
+        ignore_fields = {"debug", "can_cancel", "progress"}
+        # Normalize query dict
+        norm = {}
+        for k, v in query_data.items():
+            if k in ignore_fields or v is None:
+                continue
+            # Sort lists for stable hashing
+            if k in {"dimensions", "metrics", "sources", "properties"} and isinstance(v, list):
+                norm[k] = sorted(v)
+            elif isinstance(v, list):
+                norm[k] = v[:]  # copy
+            else:
+                norm[k] = v
+        # Remove empty lists/dicts
+        norm = {k: v for k, v in norm.items() if v not in ([], {}, None)}
+        normalized = json.dumps(norm, sort_keys=True, default=str)
         return hashlib.sha256(normalized.encode()).hexdigest()
     
     def get_cached_query(self, query_data: Dict[str, Any], ttl_seconds: int = 3600) -> Optional[Dict[str, Any]]:
