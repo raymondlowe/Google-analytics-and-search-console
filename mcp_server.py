@@ -19,6 +19,7 @@ from typing import Dict, Optional, List, Union
 from contextlib import asynccontextmanager
 from mcp.server.fastmcp import FastMCP
 from datetime import datetime
+from mcp_auth import extract_keys_from_request, determine_token, strip_key_param_from_scope
 import concurrent.futures
 
 # Suppress Google API warnings about file_cache and oauth2client
@@ -1631,29 +1632,20 @@ async def debug_request_headers() -> dict:
 
 # Security middleware for HTTP mode with enhanced logging and rate limiting
 class BearerTokenMiddleware:
+    """Middleware to authenticate incoming HTTP requests using header or ?key= param.
+
+    Uses helpers in `mcp_auth` for parsing and stripping the query param.
     """
-    Enhanced middleware to handle Bearer token authentication for HTTP mode.
-    Provides secure API key validation with proper error handling, logging, and rate limiting.
-    
-    Authentication Methods (in order of preference):
-    1. Authorization header: "Bearer <token>" (recommended, most secure)
-    2. URL parameter: "?key=<token>" (fallback for clients that can't send headers)
-    
-    Security Note: URL parameters are logged in server logs and browser history.
-    Use Authorization headers when possible for better security.
-    """
-    
     def __init__(self, app, api_key: str):
         self.app = app
         self.api_key = api_key
         self.logger = logging.getLogger(f"{__name__}.BearerTokenMiddleware")
-        
-        # Rate limiting per IP (simple in-memory implementation)
-        self.rate_limit_window = 60  # 1 minute
-        self.rate_limit_requests = 100  # requests per window
+
+        # Rate limiting config
+        self.rate_limit_window = 60
+        self.rate_limit_requests = 100
         self.ip_requests: Dict[str, list] = {}
-        
-        # Authentication statistics
+
         self.auth_stats = {
             'total_requests': 0,
             'header_auth': 0,
@@ -1661,250 +1653,137 @@ class BearerTokenMiddleware:
             'auth_failures': 0,
             'rate_limited': 0
         }
-    
+
     def _cleanup_rate_limit_data(self):
-        """Clean up old rate limiting data"""
         current_time = time.time()
         cutoff_time = current_time - self.rate_limit_window
-        
         for ip in list(self.ip_requests.keys()):
-            self.ip_requests[ip] = [req_time for req_time in self.ip_requests[ip] if req_time > cutoff_time]
+            self.ip_requests[ip] = [t for t in self.ip_requests[ip] if t > cutoff_time]
             if not self.ip_requests[ip]:
                 del self.ip_requests[ip]
-    
+
     def _is_rate_limited(self, client_ip: str) -> bool:
-        """Check if client IP is rate limited"""
-        current_time = time.time()
-        
-        # Clean up old data periodically
         self._cleanup_rate_limit_data()
-        
-        # Get requests for this IP in the current window
+        now = time.time()
         if client_ip not in self.ip_requests:
             self.ip_requests[client_ip] = []
-        
-        cutoff_time = current_time - self.rate_limit_window
-        recent_requests = [req_time for req_time in self.ip_requests[client_ip] if req_time > cutoff_time]
-        
-        if len(recent_requests) >= self.rate_limit_requests:
-            token = None
-            auth_method = None
-            key_from_header = None
-            key_from_query = None
-            # DEBUG: Log all headers received for troubleshooting Cloudflare tunnel issues
-            headers_debug = dict(request.headers)
-            self.logger.info(f"[{request_id}] Headers received from {client_ip}: {headers_debug}")
-            self.logger.info(f"[{request_id}] Query params: {dict(request.query_params)}")
-            self.logger.info(f"[{request_id}] Request method: {method}, path: {path}")
-            # Additional debugging for proxy/tunnel scenarios
-            proxy_headers = [
-                'cf-ray', 'cf-connecting-ip', 'cf-ipcountry', 'cf-visitor',
-                'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host',
-                'x-real-ip', 'x-original-forwarded-for'
-            ]
-            found_proxy_headers = {h: headers_debug.get(h) for h in proxy_headers if h in headers_debug}
-            if found_proxy_headers:
-                self.logger.info(f"[{request_id}] Proxy/Cloudflare headers detected: {found_proxy_headers}")
-            # Check for case variations of Authorization header (including custom headers for proxy compatibility)
-            auth_header_variations = [
-                'authorization', 'Authorization', 'AUTHORIZATION',
-                'x-authorization', 'X-Authorization',
-                'x-api-key', 'X-API-Key',  # Custom headers that proxies usually preserve
-                'x-auth-token', 'X-Auth-Token'
-            ]
-            auth_headers_found = {h: headers_debug.get(h) for h in auth_header_variations if h in headers_debug}
-            if auth_headers_found:
-                self.logger.info(f"[{request_id}] Authorization-related headers found: {list(auth_headers_found.keys())}")
-            else:
-                self.logger.warning(f"[{request_id}] No Authorization headers found in any variation")
-        
-        # Start request tracking
-        request_info = request_tracker.start_request(request_id, client_ip, method, path)
-        
+        cutoff = now - self.rate_limit_window
+        recent = [t for t in self.ip_requests[client_ip] if t > cutoff]
+        return len(recent) >= self.rate_limit_requests
+
+    async def __call__(self, scope, receive, send):
+        # Only handle HTTP
+        if scope.get("type") != "http":
+            await self.app(scope, receive, send)
+            return
+
+        from starlette.requests import Request
+        from starlette.responses import JSONResponse
+
+        request = Request(scope, receive)
+        client_ip = request.client.host if request.client else 'unknown'
+        method = request.method
+        path = request.url.path
+
+        request_id = str(uuid.uuid4())[:8]
+        set_request_context(request_id)
+        request_tracker.start_request(request_id, client_ip, method, path)
         self.auth_stats['total_requests'] += 1
-        
-        # Handle CORS preflight requests (OPTIONS method)
+
+        # Handle CORS preflight
         if method == "OPTIONS":
-            self.logger.info(f"[{request_id}] Handling CORS preflight request from {client_ip}")
-            
-            # Get the origin from request headers
             origin = request.headers.get("origin", "*")
-            
-            # CORS preflight response
             cors_headers = {
                 "Access-Control-Allow-Origin": origin,
                 "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
                 "Access-Control-Allow-Headers": "Authorization, Content-Type, Accept, X-API-Key, X-Auth-Token",
                 "Access-Control-Allow-Credentials": "true",
-                "Access-Control-Max-Age": "86400",  # 24 hours
+                "Access-Control-Max-Age": "86400",
             }
-            
-            response = JSONResponse(
-                status_code=200,
-                content={"message": "CORS preflight OK"},
-                headers=cors_headers
-            )
+            response = JSONResponse(status_code=200, content={"message": "CORS preflight OK"}, headers=cors_headers)
             request_tracker.end_request(request_id, 200)
             await response(scope, receive, send)
             return
-        
-        # Check rate limiting (skip for OPTIONS requests)
+
+        # Rate limiting
         if self._is_rate_limited(client_ip):
             self.auth_stats['rate_limited'] += 1
-            self.logger.warning(f"Rate limit exceeded for {client_ip} - {len(self.ip_requests.get(client_ip, []))} requests in window")
-            
-            response = JSONResponse(
-                status_code=429,
-                content={
-                    "error": "Rate limit exceeded",
-                    "message": f"Too many requests from {client_ip}. Limit: {self.rate_limit_requests} requests per {self.rate_limit_window} seconds",
-                    "request_id": request_id
-                }
-            )
+            self.logger.warning(f"Rate limit exceeded for {client_ip}")
+            response = JSONResponse(status_code=429, content={
+                "error": "Rate limit exceeded",
+                "message": f"Too many requests from {client_ip}. Limit: {self.rate_limit_requests} per {self.rate_limit_window}s",
+                "request_id": request_id
+            })
             request_tracker.end_request(request_id, 429, "Rate limit exceeded")
             await response(scope, receive, send)
             return
-        
-    token = None
-    auth_method = None
-    key_from_header = None
-    key_from_query = None
-        
-        # DEBUG: Log all headers received for troubleshooting Cloudflare tunnel issues
-        headers_debug = dict(request.headers)
-        self.logger.info(f"[{request_id}] Headers received from {client_ip}: {headers_debug}")
-        self.logger.info(f"[{request_id}] Query params: {dict(request.query_params)}")
-        self.logger.info(f"[{request_id}] Request method: {method}, path: {path}")
-        
-        # Additional debugging for proxy/tunnel scenarios
-        proxy_headers = [
-            'cf-ray', 'cf-connecting-ip', 'cf-ipcountry', 'cf-visitor',
-            'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host',
-            'x-real-ip', 'x-original-forwarded-for'
-        ]
-        found_proxy_headers = {h: headers_debug.get(h) for h in proxy_headers if h in headers_debug}
-        if found_proxy_headers:
-            self.logger.info(f"[{request_id}] Proxy/Cloudflare headers detected: {found_proxy_headers}")
-        
-        # Check for case variations of Authorization header (including custom headers for proxy compatibility)
-        auth_header_variations = [
-            'authorization', 'Authorization', 'AUTHORIZATION',
-            'x-authorization', 'X-Authorization',
-            'x-api-key', 'X-API-Key',  # Custom headers that proxies usually preserve
-            'x-auth-token', 'X-Auth-Token'
-        ]
-        auth_headers_found = {h: headers_debug.get(h) for h in auth_header_variations if h in headers_debug}
-        if auth_headers_found:
-            self.logger.info(f"[{request_id}] Authorization-related headers found: {list(auth_headers_found.keys())}")
-        else:
-            self.logger.warning(f"[{request_id}] No Authorization headers found in any variation")
-        
-        # Primary authentication: Check Authorization header
-        auth_header = request.headers.get("Authorization")
-        if not auth_header:
-            auth_header = request.headers.get("X-API-Key")
-            if auth_header and not auth_header.startswith("Bearer "):
-                auth_header = f"Bearer {auth_header}"
-        if not auth_header:
-            auth_header = request.headers.get("X-Auth-Token")
-            if auth_header and not auth_header.startswith("Bearer "):
-                auth_header = f"Bearer {auth_header}"
-        self.logger.info(f"[{request_id}] Authorization header: {repr(auth_header)}")
-        if auth_header and auth_header.startswith("Bearer "):
-            key_from_header = auth_header[7:]
-            token = key_from_header
-            auth_method = "header"
-            self.auth_stats['header_auth'] += 1
-            self.logger.info(f"[{request_id}] Found Bearer token via header (length: {len(token)})")
-        if "key" in request.query_params:
-            key_from_query = request.query_params.get("key")
-            if not token:
-                token = key_from_query
-                auth_method = "url_param"
-                self.auth_stats['url_param_auth'] += 1
-                self.logger.info(f"[{request_id}] Found key via URL parameter (length: {len(token) if token else 0})")
-                if not hasattr(self, '_logged_url_param_ips'):
-                    self._logged_url_param_ips = set()
-                if client_ip not in self._logged_url_param_ips:
-                    self.logger.info(f"Using URL parameter authentication from {client_ip} (consider using Authorization header for better security)")
-                    self._logged_url_param_ips.add(client_ip)
 
-        # If both header and query key are present and match, strip ?key= from query string for downstream code
+        # Debug: headers and query
+        headers_debug = dict(request.headers)
+        self.logger.info(f"[{request_id}] Headers: {headers_debug}")
+        self.logger.info(f"[{request_id}] Query params: {dict(request.query_params)}")
+
+        # Parse authentication
+        key_from_header, key_from_query, _raw = extract_keys_from_request(request)
+        token, auth_method = determine_token(key_from_header, key_from_query)
+        if auth_method == 'header':
+            self.auth_stats['header_auth'] += 1
+        elif auth_method == 'url_param':
+            self.auth_stats['url_param_auth'] += 1
+            if not hasattr(self, '_logged_url_param_ips'):
+                self._logged_url_param_ips = set()
+            if client_ip not in self._logged_url_param_ips:
+                self._logged_url_param_ips.add(client_ip)
+                self.logger.info(f"Using URL parameter authentication from {client_ip}")
+
+        # If both provided and equal, remove key from query for downstream
         if key_from_header and key_from_query and key_from_header == key_from_query:
-            if hasattr(request, 'scope') and 'query_string' in request.scope:
-                query_string = request.scope['query_string']
-                if isinstance(query_string, bytes):
-                    query_string = query_string.decode()
-                # Remove key=...& or &key=... or just key=...
-                new_query = re.sub(r'([&?])key=[^&]*&?', r'\1', query_string)
-                new_query = re.sub(r'[&?]+$', '', new_query)  # Remove trailing & or ?
-                request.scope['query_string'] = new_query.encode()
-        
-        # No authentication provided
+            strip_key_param_from_scope(request)
+
+        # No auth
         if not token:
             self.auth_stats['auth_failures'] += 1
             self.logger.warning(f"[{request_id}] No authentication provided from {client_ip}")
-            self.logger.warning(f"[{request_id}] Available headers: {list(request.headers.keys())}")
-            self.logger.warning(f"[{request_id}] Available query params: {list(request.query_params.keys())}")
-            response = JSONResponse(
-                status_code=401,
-                content={
-                    "error": "Authentication required", 
-                    "message": "Provide either 'Authorization: Bearer <token>' header or '?key=<token>' URL parameter",
-                    "request_id": request_id
-                }
-            )
+            response = JSONResponse(status_code=401, content={
+                "error": "Authentication required",
+                "message": "Provide Authorization: Bearer <token> or ?key=<token>",
+                "request_id": request_id
+            })
             request_tracker.end_request(request_id, 401, "No authentication")
             await response(scope, receive, send)
             return
-        
-        # Validate the token using secure comparison to prevent timing attacks
+
+        # Validate token
         if not secure_compare(token, self.api_key):
             self.auth_stats['auth_failures'] += 1
             self.logger.warning(f"[{request_id}] Invalid API key via {auth_method} from {client_ip}")
-            self.logger.warning(f"[{request_id}] Token received (length {len(token)}): {token[:8]}...{token[-8:] if len(token) > 16 else token}")
-            self.logger.warning(f"[{request_id}] Expected token (length {len(self.api_key)}): {self.api_key[:8]}...{self.api_key[-8:] if len(self.api_key) > 16 else self.api_key}")
-            response = JSONResponse(
-                status_code=401,
-                content={
-                    "error": "Invalid API key",
-                    "request_id": request_id
-                }
-            )
+            response = JSONResponse(status_code=401, content={"error": "Invalid API key", "request_id": request_id})
             request_tracker.end_request(request_id, 401, "Invalid API key")
             await response(scope, receive, send)
             return
-        
-        # Token is valid, log success and proceed
+
+        # Success: forward request and attach CORS headers on response
         self.logger.info(f"[{request_id}] Authentication successful via {auth_method} from {client_ip}")
-        self.logger.debug(f"[{request_id}] Proceeding to process request: {method} {path}")
-        
-        # Add middleware to track successful completion and add CORS headers
+
         async def tracking_send(message):
-            if message["type"] == "http.response.start":
-                status_code = message["status"]
-                
-                # Add CORS headers to all responses
+            if message.get("type") == "http.response.start":
+                status_code = message.get("status")
                 if "headers" not in message:
                     message["headers"] = []
-                
                 origin = request.headers.get("origin", "*")
-                cors_headers = [
+                cors = [
                     (b"access-control-allow-origin", origin.encode()),
                     (b"access-control-allow-credentials", b"true"),
                     (b"access-control-allow-methods", b"GET, POST, OPTIONS"),
-                    (b"access-control-allow-headers", b"Authorization, Content-Type, Accept, X-API-Key, X-Auth-Token"),
+                    (b"access-control-allow-headers", b"Authorization, Content-Type, Accept, X-API-Key, X-Auth-Token")
                 ]
-                
-                # Add CORS headers if not already present
-                existing_headers = [h[0].lower() for h in message["headers"]]
-                for header_name, header_value in cors_headers:
-                    if header_name not in existing_headers:
-                        message["headers"].append((header_name, header_value))
-                
+                existing = [h[0].lower() for h in message["headers"]]
+                for name, val in cors:
+                    if name not in existing:
+                        message["headers"].append((name, val))
                 request_tracker.end_request(request_id, status_code)
             await send(message)
-        
+
         await self.app(scope, receive, tracking_send)
 
 if __name__ == "__main__":
@@ -2033,6 +1912,29 @@ if __name__ == "__main__":
         print(f"Starting MCP HTTP server on {args.host}:{args.port}")
         print_github_copilot_mcp_config(args.host, args.port, api_key, scheme="http")
         import uvicorn
+        # Suppress noisy ClosedResourceError stacktraces from internal streamable HTTP code
+        try:
+            import anyio
+        except Exception:
+            anyio = None
+
+        class _ClosedResourceFilter(logging.Filter):
+            def filter(self, record):
+                # If there is no exception info, keep the record
+                ei = getattr(record, 'exc_info', None)
+                if not ei:
+                    return True
+                exc = ei[1]
+                try:
+                    if anyio is not None and isinstance(exc, anyio.ClosedResourceError):
+                        # Suppress this particular exception to avoid noisy stacktraces
+                        return False
+                except Exception:
+                    pass
+                return True
+
+        stream_logger = logging.getLogger('mcp.server.streamable_http')
+        stream_logger.addFilter(_ClosedResourceFilter())
         
         # Create the streamable HTTP app and add authentication middleware
         app = mcp.streamable_http_app()
