@@ -1949,7 +1949,7 @@ if __name__ == "__main__":
             "invalidate_cache",
             "debug_request_headers"
         ]
-        print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent (RECOMMENDED - Header Auth):\n")
+        print("\n🔗 Sample mcpServers config for GitHub Copilot coding agent (RECOMMENDED - Local/Direct):\n")
         print("{")
         print('  "mcpServers": {')
         print('    "ga4-gsc-mcp": {')
@@ -1966,8 +1966,27 @@ if __name__ == "__main__":
         print('    }')
         print('  }')
         print('}')
-        print("➡️  Paste this block into your repository’s Copilot coding agent MCP configuration \n")
-
+        print("➡️  Use this for direct connections (localhost or when Authorization headers work)\n")
+        
+        # Add Cloudflare tunnel configuration
+        print("🔗 Alternative config for Cloudflare tunnels/proxies (RECOMMENDED - Custom Header):\n")
+        print("{")
+        print('  "mcpServers": {')
+        print('    "ga4-gsc-mcp": {')
+        print('      "type": "http",')
+        print(f'      "url": "{url}",')
+        print(f'      "headers": {{')
+        print(f'        "X-API-Key": "{api_key}"')
+        print(f'      }},')
+        print('      "tools": [')
+        for i, tool in enumerate(tools):
+            comma = "," if i < len(tools) - 1 else ""
+            print(f'        "{tool}"{comma}')
+        print('      ]')
+        print('    }')
+        print('  }')
+        print('}')
+        print("➡️  Use this when Authorization headers are stripped by proxies/tunnels\n")
         
         # Add fallback configuration for clients that don't support Authorization headers
         url_with_key = f"{scheme}://{display_host}:{port}/mcp?key={api_key}"
