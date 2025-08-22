@@ -5,6 +5,7 @@ Designed for AI model access with tools for querying GA4 and GSC data.
 """
 
 import asyncio
+import re
 import logging
 import json
 import pandas as pd
@@ -1686,36 +1687,36 @@ class BearerTokenMiddleware:
         recent_requests = [req_time for req_time in self.ip_requests[client_ip] if req_time > cutoff_time]
         
         if len(recent_requests) >= self.rate_limit_requests:
-            return True
-        
-        # Add current request
-        self.ip_requests[client_ip] = recent_requests + [current_time]
-        return False
-    
-    def get_stats(self) -> Dict:
-        """Get authentication and rate limiting statistics"""
-        return {
-            **self.auth_stats,
-            'unique_ips': len(self.ip_requests),
-            'request_tracker_stats': request_tracker.get_stats()
-        }
-    
-    async def __call__(self, scope, receive, send):
-        if scope["type"] != "http":
-            await self.app(scope, receive, send)
-            return
-            
-        from starlette.requests import Request
-        from starlette.responses import JSONResponse
-        
-        request = Request(scope, receive)
-        client_ip = request.client.host if request.client else 'unknown'
-        method = request.method
-        path = request.url.path
-        
-        # Generate unique request ID for tracking
-        request_id = str(uuid.uuid4())[:8]
-        set_request_context(request_id)
+            token = None
+            auth_method = None
+            key_from_header = None
+            key_from_query = None
+            # DEBUG: Log all headers received for troubleshooting Cloudflare tunnel issues
+            headers_debug = dict(request.headers)
+            self.logger.info(f"[{request_id}] Headers received from {client_ip}: {headers_debug}")
+            self.logger.info(f"[{request_id}] Query params: {dict(request.query_params)}")
+            self.logger.info(f"[{request_id}] Request method: {method}, path: {path}")
+            # Additional debugging for proxy/tunnel scenarios
+            proxy_headers = [
+                'cf-ray', 'cf-connecting-ip', 'cf-ipcountry', 'cf-visitor',
+                'x-forwarded-for', 'x-forwarded-proto', 'x-forwarded-host',
+                'x-real-ip', 'x-original-forwarded-for'
+            ]
+            found_proxy_headers = {h: headers_debug.get(h) for h in proxy_headers if h in headers_debug}
+            if found_proxy_headers:
+                self.logger.info(f"[{request_id}] Proxy/Cloudflare headers detected: {found_proxy_headers}")
+            # Check for case variations of Authorization header (including custom headers for proxy compatibility)
+            auth_header_variations = [
+                'authorization', 'Authorization', 'AUTHORIZATION',
+                'x-authorization', 'X-Authorization',
+                'x-api-key', 'X-API-Key',  # Custom headers that proxies usually preserve
+                'x-auth-token', 'X-Auth-Token'
+            ]
+            auth_headers_found = {h: headers_debug.get(h) for h in auth_header_variations if h in headers_debug}
+            if auth_headers_found:
+                self.logger.info(f"[{request_id}] Authorization-related headers found: {list(auth_headers_found.keys())}")
+            else:
+                self.logger.warning(f"[{request_id}] No Authorization headers found in any variation")
         
         # Start request tracking
         request_info = request_tracker.start_request(request_id, client_ip, method, path)
@@ -1764,8 +1765,10 @@ class BearerTokenMiddleware:
             await response(scope, receive, send)
             return
         
-        token = None
-        auth_method = None
+    token = None
+    auth_method = None
+    key_from_header = None
+    key_from_query = None
         
         # DEBUG: Log all headers received for troubleshooting Cloudflare tunnel issues
         headers_debug = dict(request.headers)
@@ -1798,53 +1801,44 @@ class BearerTokenMiddleware:
         
         # Primary authentication: Check Authorization header
         auth_header = request.headers.get("Authorization")
-        # Fallback: Check custom headers that might bypass proxy filtering
         if not auth_header:
             auth_header = request.headers.get("X-API-Key")
             if auth_header and not auth_header.startswith("Bearer "):
-                auth_header = f"Bearer {auth_header}"  # Normalize format
+                auth_header = f"Bearer {auth_header}"
         if not auth_header:
             auth_header = request.headers.get("X-Auth-Token")
             if auth_header and not auth_header.startswith("Bearer "):
-                auth_header = f"Bearer {auth_header}"  # Normalize format
-                
+                auth_header = f"Bearer {auth_header}"
         self.logger.info(f"[{request_id}] Authorization header: {repr(auth_header)}")
-        
-        if auth_header:
-            if not auth_header.startswith("Bearer "):
-                self.auth_stats['auth_failures'] += 1
-                self.logger.warning(f"[{request_id}] Invalid Authorization header format from {client_ip}: {repr(auth_header)}")
-                response = JSONResponse(
-                    status_code=401,
-                    content={
-                        "error": "Invalid Authorization header format", 
-                        "message": "Expected 'Bearer <token>'",
-                        "request_id": request_id
-                    }
-                )
-                request_tracker.end_request(request_id, 401, "Invalid auth header format")
-                await response(scope, receive, send)
-                return
-            
-            token = auth_header[7:]  # Remove "Bearer " prefix
+        if auth_header and auth_header.startswith("Bearer "):
+            key_from_header = auth_header[7:]
+            token = key_from_header
             auth_method = "header"
             self.auth_stats['header_auth'] += 1
             self.logger.info(f"[{request_id}] Found Bearer token via header (length: {len(token)})")
-        
-        # Fallback authentication: Check URL parameter
-        elif "key" in request.query_params:
-            token = request.query_params.get("key")
-            auth_method = "url_param"
-            self.auth_stats['url_param_auth'] += 1
-            self.logger.info(f"[{request_id}] Found key via URL parameter (length: {len(token) if token else 0})")
-            
-            # Only log this message once per IP to avoid spam
-            if not hasattr(self, '_logged_url_param_ips'):
-                self._logged_url_param_ips = set()
-            
-            if client_ip not in self._logged_url_param_ips:
-                self.logger.info(f"Using URL parameter authentication from {client_ip} (consider using Authorization header for better security)")
-                self._logged_url_param_ips.add(client_ip)
+        if "key" in request.query_params:
+            key_from_query = request.query_params.get("key")
+            if not token:
+                token = key_from_query
+                auth_method = "url_param"
+                self.auth_stats['url_param_auth'] += 1
+                self.logger.info(f"[{request_id}] Found key via URL parameter (length: {len(token) if token else 0})")
+                if not hasattr(self, '_logged_url_param_ips'):
+                    self._logged_url_param_ips = set()
+                if client_ip not in self._logged_url_param_ips:
+                    self.logger.info(f"Using URL parameter authentication from {client_ip} (consider using Authorization header for better security)")
+                    self._logged_url_param_ips.add(client_ip)
+
+        # If both header and query key are present and match, strip ?key= from query string for downstream code
+        if key_from_header and key_from_query and key_from_header == key_from_query:
+            if hasattr(request, 'scope') and 'query_string' in request.scope:
+                query_string = request.scope['query_string']
+                if isinstance(query_string, bytes):
+                    query_string = query_string.decode()
+                # Remove key=...& or &key=... or just key=...
+                new_query = re.sub(r'([&?])key=[^&]*&?', r'\1', query_string)
+                new_query = re.sub(r'[&?]+$', '', new_query)  # Remove trailing & or ?
+                request.scope['query_string'] = new_query.encode()
         
         # No authentication provided
         if not token:
