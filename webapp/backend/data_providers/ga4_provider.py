@@ -219,12 +219,33 @@ class GA4Provider:
         """Normalize GA4 DataFrame to unified format"""
         if df is None or df.empty:
             return []
+        
+        # Known metric columns that should be treated as numbers
+        metric_columns = {
+            'totalAdRevenue', 'totalRevenue', 'screenPageViews', 'sessions', 
+            'activeUsers', 'newUsers', 'totalUsers', 'scrolledUsers',
+            'userEngagementDuration', 'averageSessionDuration', 'bounceRate', 
+            'engagementRate', 'publisherAdClicks', 'publisherAdImpressions',
+            'eventCount', 'eventCountPerUser', 'keyEvents', 'sessionsPerUser'
+        }
+        
         # Add source information
         records = df.to_dict('records')
         for record in records:
+            # Fix scientific notation only for known metric columns
+            for key, value in record.items():
+                if key in metric_columns and isinstance(value, float):
+                    if abs(value) < 1e-4 and value != 0:
+                        # Convert small scientific notation to decimal
+                        record[key] = float(f"{value:.20f}".rstrip('0').rstrip('.'))
+            
             record['_source'] = 'ga4'
             record['_source_name'] = 'Google Analytics 4'
             # Add 'url' if both hostname and pagePath are present
             if 'hostname' in record and 'pagePath' in record and record['hostname'] and record['pagePath']:
-                record['url'] = f"https://www.{record['hostname']}{record['pagePath']}"
+                hostname = record['hostname']
+                # Only add www. if it's not already present
+                if not hostname.startswith('www.'):
+                    hostname = f"www.{hostname}"
+                record['url'] = f"https://{hostname}{record['pagePath']}"
         return records
