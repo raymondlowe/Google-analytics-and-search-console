@@ -256,9 +256,19 @@ class GSCProvider:
         if df is None or df.empty:
             return []
         
+        # Known metric columns that should be treated as numbers
+        metric_columns = {'clicks', 'impressions', 'ctr', 'position'}
+        
         # Add source information
         records = df.to_dict('records')
         for record in records:
+            # Fix scientific notation only for known metric columns
+            for key, value in record.items():
+                if key in metric_columns and isinstance(value, float):
+                    if abs(value) < 1e-4 and value != 0:
+                        # Convert small scientific notation to decimal
+                        record[key] = float(f"{value:.20f}".rstrip('0').rstrip('.'))
+            
             record['_source'] = 'gsc'
             record['_source_name'] = 'Google Search Console'
         
