@@ -470,15 +470,73 @@ class Dashboard {
                     badge.textContent = value.toUpperCase();
                     td.appendChild(badge);
                 } else {
-                    // Format numbers to avoid scientific notation
+                    // Format numbers to avoid scientific notation, but only for actual numeric values
                     if (typeof value === 'number') {
-                        if (value % 1 === 0) {
-                            // Integer formatting
-                            value = value.toLocaleString();
+                        // Check if this looks like a metric field that should be formatted as a number
+                        const metricFields = ['totalAdRevenue', 'totalRevenue', 'screenPageViews', 'sessions', 
+                                            'activeUsers', 'newUsers', 'totalUsers', 'clicks', 'impressions', 
+                                            'ctr', 'position', 'bounceRate', 'engagementRate'];
+                        
+                        if (metricFields.includes(header)) {
+                            if (value % 1 === 0) {
+                                // Integer formatting for metrics
+                                value = value.toLocaleString();
+                            } else {
+                                // Decimal formatting for metrics - avoid scientific notation
+                                let str = value.toString();
+                                if (str.includes('e') || str.includes('E')) {
+                                    // Convert scientific notation to decimal string
+                                    let [mantissa, exponent] = str.split(/[eE]/);
+                                    let exp = parseInt(exponent, 10);
+                                    let [intPart, fracPart = ''] = mantissa.split('.');
+                                    let digits = intPart + fracPart;
+                                    let decPoint = intPart.length;
+                                    decPoint += exp;
+                                    if (decPoint <= 0) {
+                                        // Pad zeros before
+                                        value = '0.' + '0'.repeat(Math.abs(decPoint)) + digits;
+                                    } else if (decPoint >= digits.length) {
+                                        // Pad zeros after
+                                        value = digits + '0'.repeat(decPoint - digits.length);
+                                    } else {
+                                        // Insert decimal point
+                                        value = digits.slice(0, decPoint) + '.' + digits.slice(decPoint);
+                                    }
+                                    // Remove trailing zeros and possible trailing dot
+                                    value = value.replace(/\.?0+$/, '');
+                                } else {
+                                    // Already decimal, just show up to 20 decimals, trim trailing zeros
+                                    value = value.toFixed(20).replace(/\.?0+$/, '');
+                                }
+                            }
                         } else {
-                            // Always use fixed-point decimal, up to 8 decimals, never e-notation
-                            value = value.toFixed(8).replace(/\.?0+$/, '');
+                            // For non-metric fields (like IDs), just show as-is without comma formatting
+                            value = value.toString();
                         }
+                    } else if (typeof value === 'string' && (value.includes('e') || value.includes('E'))) {
+                        // Only handle string values that explicitly contain scientific notation
+                        // Check if it's actually a number in scientific notation, not just text containing 'e'
+                        if (/^-?\d+(\.\d+)?[eE][+-]?\d+$/.test(value.trim())) {
+                            let [mantissa, exponent] = value.split(/[eE]/);
+                            let exp = parseInt(exponent, 10);
+                            let [intPart, fracPart = ''] = mantissa.split('.');
+                            let digits = intPart + fracPart;
+                            let decPoint = intPart.length;
+                            decPoint += exp;
+                            if (decPoint <= 0) {
+                                // Pad zeros before
+                                value = '0.' + '0'.repeat(Math.abs(decPoint)) + digits;
+                            } else if (decPoint >= digits.length) {
+                                // Pad zeros after
+                                value = digits + '0'.repeat(decPoint - digits.length);
+                            } else {
+                                // Insert decimal point
+                                value = digits.slice(0, decPoint) + '.' + digits.slice(decPoint);
+                            }
+                            // Remove trailing zeros and possible trailing dot
+                            value = value.replace(/\.?0+$/, '');
+                        }
+                        // Otherwise keep as original string
                     }
                     td.textContent = value || '';
                 }
