@@ -13,6 +13,7 @@ import logging
 from typing import Dict, Any, Optional
 import json
 import xlsxwriter
+import numpy as np
 
 from shared_state import active_queries, progress_websockets
 from core.query_models import QueryRequest, QueryResponse, PaginatedResponse
@@ -20,6 +21,21 @@ from core.cache import UnifiedCache
 from data_providers import DataProviderRegistry
 
 logger = logging.getLogger(__name__)
+
+
+def format_numeric_values(obj):
+    """Recursively format numeric values to avoid scientific notation"""
+    if isinstance(obj, dict):
+        return {key: format_numeric_values(value) for key, value in obj.items()}
+    elif isinstance(obj, list):
+        return [format_numeric_values(item) for item in obj]
+    elif isinstance(obj, float):
+        # Convert small floats to avoid scientific notation
+        if abs(obj) < 1e-4 and obj != 0:
+            return float(f"{obj:.20f}".rstrip('0').rstrip('.'))
+        return obj
+    else:
+        return obj
 
 
 router = APIRouter()
