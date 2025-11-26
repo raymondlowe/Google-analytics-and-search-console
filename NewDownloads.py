@@ -1149,6 +1149,8 @@ if __name__ == "__main__":
     parser.add_argument("-w","--wait",type=int, default=0, help="Wait in seconds between API calls to prevent quota problems; default 0 seconds")
     parser.add_argument("-s","--domain",type=str, default="", help="Filter results to a specific domain (e.g., 'example.com'). If not specified, data from all accessible domains will be downloaded.")
     parser.add_argument("--list-domains", action="store_true", help="List all available Search Console domains/sites and exit")
+    parser.add_argument("--include-all-domains", action="store_true", help="Include all domains in the list, even if not verified")
+    parser.add_argument("--no-cache", action="store_true", help="Disable caching for domain list to force fresh data")
     parser.add_argument("--max-retries", type=int, default=3, help="Maximum retry attempts for failed API calls; default 3")
     parser.add_argument("--retry-delay", type=int, default=5, help="Base delay in seconds for retry attempts (uses exponential backoff); default 5")
     parser.add_argument("-f", "--format", default="excel", choices=("excel", "csv"), help="Output format for the data; default is excel (.xlsx with metadata sheet), csv saves main data as .csv and metadata as .txt")
@@ -1162,7 +1164,7 @@ if __name__ == "__main__":
     # Handle list domains command
     if args.list_domains:
         print("Listing available Google Search Console domains...")
-        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True, extra_auth_flags=extra_auth_flags, include_all_domains=args.include_all_domains)
+        sites_df = list_search_console_sites(google_account=args.googleaccount, debug=True, extra_auth_flags=extra_auth_flags, include_all_domains=args.include_all_domains, use_cache=not args.no_cache)
         if sites_df is not None and len(sites_df) > 0:
             print("\nAvailable domains:")
             print(sites_df.to_string(index=False))
