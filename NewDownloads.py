@@ -1199,8 +1199,7 @@ if __name__ == "__main__":
         domain_filter=domain_filter,
         max_retries=args.max_retries,
         retry_delay=args.retry_delay,
-        extra_auth_flags=extra_auth_flags,
-        include_all_domains=args.include_all_domains
+        extra_auth_flags=extra_auth_flags
     )
         
     # Save the data if we got any
